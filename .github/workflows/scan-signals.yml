@@ -27,4 +27,5 @@ jobs:
           MIN_SIGNAL_SCORE: "3"
           WINRATE_ALERT_THRESHOLD: "45"
           TIMEZONE: Asia/Bangkok
+          SEND_SCAN_STATUS_WHEN_NO_SIGNAL: "true"
         run: python -m src.main scan

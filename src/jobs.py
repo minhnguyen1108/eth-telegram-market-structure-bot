@@ -50,19 +50,32 @@ def format_signal_message(signal: TradeSignal) -> str:
     )
 
 
+def send_scan_status_message(message: str) -> None:
+    if settings.send_scan_status_when_no_signal:
+        send_telegram_message(
+            settings.telegram_bot_token,
+            settings.telegram_chat_id,
+            message,
+        )
+
+
 def run_signal_scan() -> str:
     init_db()
     higher_tf = fetch_klines(settings.symbol, settings.higher_timeframe, limit=220)
     lower_tf = fetch_klines(settings.symbol, settings.timeframe, limit=300)
     setup = build_signal(lower_tf, higher_tf, settings.risk_reward, settings.min_signal_score)
     if setup is None:
+        message = f"[{settings.symbol}] Không có tín hiệu ở khung {settings.timeframe} lúc này."
+        send_scan_status_message(message)
         return "No trade setup found."
 
     trigger_time = datetime.fromisoformat(setup.trigger_candle_time).astimezone(UTC).replace(tzinfo=None)
     with SessionLocal() as session:
         if has_open_trade(session):
+            send_scan_status_message(f"[{settings.symbol}] Chưa quét lệnh mới vì đang còn một lệnh mở.")
             return "Skipped because an open trade already exists."
         if latest_duplicate(session, setup.side, trigger_time):
+            send_scan_status_message(f"[{settings.symbol}] Có setup giống lần quét gần nhất nên bot bỏ qua để tránh bắn trùng.")
             return "Skipped duplicate signal."
 
         signal = TradeSignal(

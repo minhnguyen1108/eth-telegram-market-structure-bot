@@ -20,6 +20,7 @@ Mot tin hieu hop le can:
 ## 3 lich tu dong
 
 1. Moi 15 phut quet tin hieu va gui Telegram neu co lenh.
+   Co the bat che do gui ca thong bao "khong co tin hieu" bang bien `SEND_SCAN_STATUS_WHEN_NO_SIGNAL=true`.
 2. Dinh ky cap nhat ket qua cac lenh dang mo, tinh winrate va tao goi y cai thien khi winrate thap.
 3. Moi ngay tong hop winrate trong ngay va gui bao cao.
    Job nay nen chay sau 00:00 theo gio cua ban. Cau hinh hien tai dung `17:05 UTC`, tuong ung `00:05` gio `Asia/Bangkok`, de tong hop ngay vua ket thuc.
@@ -80,3 +81,4 @@ Neu muon doi threshold va tham so:
 - `MIN_SIGNAL_SCORE`
 - `WINRATE_ALERT_THRESHOLD`
 - `TIMEZONE`
+- `SEND_SCAN_STATUS_WHEN_NO_SIGNAL`
