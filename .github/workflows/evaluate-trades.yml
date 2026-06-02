@@ -2,8 +2,6 @@ name: Evaluate Trades
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "7,22,37,52 * * * *"
 
 jobs:
   evaluate:
