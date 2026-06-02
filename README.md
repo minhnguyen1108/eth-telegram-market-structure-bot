@@ -1,78 +1,83 @@
 # ETH/USDT Market Structure Bot
 
-Bot quet ETH/USDT theo market structure + price action, gui tin hieu ve Telegram, luu lich su lenh vao database va cap nhat winrate tu dong.
+This project scans `ETH/USDT` using a market structure + price action approach, sends alerts to Telegram, stores trade history in a database, and tracks win rate automatically.
 
-## Chien luoc
+## Strategy
 
-Bot dung 2 khung:
+The bot uses two timeframes:
 
-- `4h`: xac dinh bias chinh theo market structure va EMA50.
-- `15m`: tim breakout of structure, cho gia hoi ve value zone va xac nhan bang nen price action.
+- `4h`: determines the higher-timeframe bias using market structure and EMA50.
+- `15m`: looks for break of structure, pullback into value, and price action confirmation.
 
-Mot tin hieu hop le can:
+A valid setup requires:
 
-1. Bias `4h` dong thuan.
-2. Co break of structure tren `15m`.
-3. Gia hoi ve vung `0.382` den `0.618` cua impulse gan nhat.
-4. Co nen xac nhan dang `engulfing` hoac `pin bar`.
-5. Diem chat luong du lon theo thang diem noi bo.
+1. Higher-timeframe bias is aligned.
+2. A break of structure appears on `15m`.
+3. Price pulls back into the `0.382` to `0.618` zone of the latest impulse.
+4. A confirmation candle appears as an `engulfing` candle or `pin bar`.
+5. The internal setup score is above the configured threshold.
 
-## 3 lich tu dong
+## Automated Jobs
 
-1. Moi 15 phut quet tin hieu va gui Telegram neu co lenh.
-   Co the bat che do gui ca thong bao "khong co tin hieu" bang bien `SEND_SCAN_STATUS_WHEN_NO_SIGNAL=true`.
-2. Dinh ky cap nhat ket qua cac lenh dang mo, tinh winrate va tao goi y cai thien khi winrate thap.
-3. Moi ngay tong hop winrate trong ngay va gui bao cao.
-   Job nay nen chay sau 00:00 theo gio cua ban. Cau hinh hien tai dung `17:05 UTC`, tuong ung `00:05` gio `Asia/Bangkok`, de tong hop ngay vua ket thuc.
+The bot uses three jobs:
 
-## Chay local
+1. Signal scan every 15 minutes.
+   The bot now sends a Telegram message even when there is no valid setup, if `SEND_SCAN_STATUS_WHEN_NO_SIGNAL=true`.
+2. Trade evaluation on a 15-minute cycle offset from the scan.
+   This checks whether open trades hit `TP` or `SL`, updates rolling win rate, and stores improvement recommendations when performance is weak.
+3. Daily summary at `00:05` Asia/Bangkok time.
+   This summarizes the previous trading day.
 
-1. Tao file `.env` tu `.env.example`.
-2. Cai goi:
+## Commands
+
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Quet tin hieu:
+Run signal scan:
 
 ```bash
 python -m src.main scan
 ```
 
-4. Cap nhat lenh:
+Run trade evaluation:
 
 ```bash
 python -m src.main evaluate
 ```
 
-5. Bao cao ngay:
+Run daily summary:
 
 ```bash
 python -m src.main daily-summary
 ```
 
-## Deploy free
+## Deployment
 
-As of June 2, 2026, giai phap free phu hop nhat cho bai toan nay la:
+As of June 3, 2026, the live setup is:
 
-- GitHub Actions de chay 3 lich cron.
-- Neon Postgres de luu database.
+- GitHub Actions for execution
+- External scheduler (`cron-job.org`) for reliable triggering
+- Neon Postgres for storage
 
-Ly do:
+Why this setup:
 
-- GitHub Actions ho tro `schedule` voi cron va chu ky ngan nhat la 5 phut theo docs: [Workflow syntax for GitHub Actions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
-- GitHub-hosted runners mien phi cho public repository theo docs: [Billing and usage](https://docs.github.com/actions/learn-github-actions/usage-limits-billing-and-administration).
-- Nhiều host web free hien nay se sleep khi khong co traffic, khong phu hop de giu scheduler trong app.
-- Bot dang dung endpoint market data public `data-api.binance.vision`, phu hop hon cho moi truong runner dat tai My theo tai lieu chinh thuc cua Binance ve market-data-only URLs.
+- Some new repositories do not trigger GitHub `schedule` reliably enough for a time-sensitive bot.
+- External schedulers are more predictable for fixed execution times.
+- GitHub Actions still provides a simple and free execution layer for public repositories.
+- The bot uses Binance public market data through `data-api.binance.vision`, which is more suitable for public market-data access from U.S.-hosted runners.
 
-## GitHub Secrets can them
+## Environment Variables
+
+Required secrets:
 
 - `DATABASE_URL`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 
-Neu muon doi threshold va tham so:
+Optional settings:
 
 - `SYMBOL`
 - `TIMEFRAME`
@@ -82,3 +87,15 @@ Neu muon doi threshold va tham so:
 - `WINRATE_ALERT_THRESHOLD`
 - `TIMEZONE`
 - `SEND_SCAN_STATUS_WHEN_NO_SIGNAL`
+
+## Scheduler Notes
+
+GitHub workflow files are configured for `workflow_dispatch` only.
+
+The external scheduler is responsible for calling:
+
+- `Scan Signals`
+- `Evaluate Trades`
+- `Daily Summary`
+
+This avoids duplicate runs and makes the execution schedule easier to control.
