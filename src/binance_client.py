@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import requests
 
 
-BINANCE_API_URL = "https://api.binance.com/api/v3/klines"
+BINANCE_API_URL = "https://data-api.binance.vision/api/v3/klines"
 
 
 @dataclass(frozen=True)

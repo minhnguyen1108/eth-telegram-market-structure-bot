@@ -63,6 +63,7 @@ Ly do:
 - GitHub Actions ho tro `schedule` voi cron va chu ky ngan nhat la 5 phut theo docs: [Workflow syntax for GitHub Actions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
 - GitHub-hosted runners mien phi cho public repository theo docs: [Billing and usage](https://docs.github.com/actions/learn-github-actions/usage-limits-billing-and-administration).
 - Nhiều host web free hien nay se sleep khi khong co traffic, khong phu hop de giu scheduler trong app.
+- Bot dang dung endpoint market data public `data-api.binance.vision`, phu hop hon cho moi truong runner dat tai My theo tai lieu chinh thuc cua Binance ve market-data-only URLs.
 
 ## GitHub Secrets can them
 
