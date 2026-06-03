@@ -8,7 +8,7 @@ from sqlalchemy import desc, select
 
 from src.binance_client import Candle, fetch_klines
 from src.config import settings
-from src.db import Base, SessionLocal, engine
+from src.db import Base, SessionLocal, engine, ensure_schema_updates
 from src.models import DailySummary, StrategyInsight, TradeSignal
 from src.strategy import build_signal
 from src.telegram_client import send_telegram_message
@@ -16,6 +16,7 @@ from src.telegram_client import send_telegram_message
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    ensure_schema_updates()
 
 
 def has_open_trade(session) -> bool:
@@ -65,17 +66,13 @@ def run_signal_scan() -> str:
     lower_tf = fetch_klines(settings.symbol, settings.timeframe, limit=300)
     setup = build_signal(lower_tf, higher_tf, settings.risk_reward, settings.min_signal_score)
     if setup is None:
-        message = f"[{settings.symbol}] Không có tín hiệu ở khung {settings.timeframe} lúc này."
-        send_scan_status_message(message)
         return "No trade setup found."
 
     trigger_time = datetime.fromisoformat(setup.trigger_candle_time).astimezone(UTC).replace(tzinfo=None)
     with SessionLocal() as session:
         if has_open_trade(session):
-            send_scan_status_message(f"[{settings.symbol}] Chưa quét lệnh mới vì đang còn một lệnh mở.")
             return "Skipped because an open trade already exists."
         if latest_duplicate(session, setup.side, trigger_time):
-            send_scan_status_message(f"[{settings.symbol}] Có setup giống lần quét gần nhất nên bot bỏ qua để tránh bắn trùng.")
             return "Skipped duplicate signal."
 
         signal = TradeSignal(
@@ -188,14 +185,24 @@ def run_trade_evaluation() -> str:
         wins = sum(1 for trade in closed_trades if trade.outcome == "WIN")
         winrate = round((wins / len(closed_trades)) * 100, 2)
         recommendation = build_recommendation(closed_trades, winrate)
-        session.add(
-            StrategyInsight(
-                scope="rolling_30",
-                winrate=winrate,
-                total_trades=len(closed_trades),
-                recommendation=recommendation,
-            )
-        )
+        recently_closed = [trade for trade in open_trades if trade.status == "CLOSED"]
+        for trade in recently_closed:
+            insight = session.execute(
+                select(StrategyInsight).where(StrategyInsight.trade_signal_id == trade.id)
+            ).scalar_one_or_none()
+            if insight is None:
+                insight = StrategyInsight(
+                    trade_signal_id=trade.id,
+                    scope="rolling_30",
+                    winrate=winrate,
+                    total_trades=len(closed_trades),
+                    recommendation=recommendation,
+                )
+                session.add(insight)
+            else:
+                insight.winrate = winrate
+                insight.total_trades = len(closed_trades)
+                insight.recommendation = recommendation
         session.commit()
 
         if closed_now > 0:

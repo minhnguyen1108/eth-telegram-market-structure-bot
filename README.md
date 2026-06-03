@@ -22,7 +22,7 @@ A valid setup requires:
 The bot uses three jobs:
 
 1. Signal scan every 15 minutes.
-   The bot now sends a Telegram message even when there is no valid setup, if `SEND_SCAN_STATUS_WHEN_NO_SIGNAL=true`.
+   The bot sends a Telegram message only when a valid signal is found.
 2. Trade evaluation on a 15-minute cycle offset from the scan.
    This checks whether open trades hit `TP` or `SL`, updates rolling win rate, and stores improvement recommendations when performance is weak.
 3. Daily summary at `00:05` Asia/Bangkok time.

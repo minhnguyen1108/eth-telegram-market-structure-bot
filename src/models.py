@@ -53,6 +53,7 @@ class StrategyInsight(Base):
     __tablename__ = "strategy_insights"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trade_signal_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     generated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     scope: Mapped[str] = mapped_column(String(30), index=True, default="rolling_30")
     winrate: Mapped[float] = mapped_column(Float)

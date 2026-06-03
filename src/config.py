@@ -21,7 +21,7 @@ class Settings:
     min_signal_score: int = int(os.getenv("MIN_SIGNAL_SCORE", "3"))
     winrate_alert_threshold: float = float(os.getenv("WINRATE_ALERT_THRESHOLD", "45"))
     timezone: str = os.getenv("TIMEZONE", "Asia/Bangkok")
-    send_scan_status_when_no_signal: bool = os.getenv("SEND_SCAN_STATUS_WHEN_NO_SIGNAL", "true").lower() == "true"
+    send_scan_status_when_no_signal: bool = os.getenv("SEND_SCAN_STATUS_WHEN_NO_SIGNAL", "false").lower() == "true"
 
 
 settings = Settings()
