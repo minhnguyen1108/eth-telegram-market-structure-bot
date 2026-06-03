@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import desc, select
@@ -12,6 +12,7 @@ from src.db import Base, SessionLocal, engine, ensure_schema_updates
 from src.models import DailySummary, StrategyInsight, TradeSignal
 from src.strategy import build_signal
 from src.telegram_client import send_telegram_message
+from src.time_utils import utc_to_local_naive
 
 
 def init_db() -> None:
@@ -68,7 +69,7 @@ def run_signal_scan() -> str:
     if setup is None:
         return "No trade setup found."
 
-    trigger_time = datetime.fromisoformat(setup.trigger_candle_time).astimezone(UTC).replace(tzinfo=None)
+    trigger_time = utc_to_local_naive(datetime.fromisoformat(setup.trigger_candle_time))
     with SessionLocal() as session:
         if has_open_trade(session):
             return "Skipped because an open trade already exists."
@@ -107,26 +108,28 @@ def run_signal_scan() -> str:
 
 def resolve_trade_with_candles(trade: TradeSignal, candles: list[Candle]) -> tuple[str, float, datetime] | None:
     for candle in candles:
-        if candle.open_time.replace(tzinfo=None) <= trade.signal_time:
+        candle_open_time = utc_to_local_naive(candle.open_time)
+        if candle_open_time <= trade.signal_time:
             continue
+        candle_close_time = utc_to_local_naive(candle.close_time)
         if trade.side == "LONG":
             hit_sl = candle.low <= trade.stop_loss
             hit_tp = candle.high >= trade.take_profit
             if hit_sl and hit_tp:
-                return "LOSS", trade.stop_loss, candle.close_time.replace(tzinfo=None)
+                return "LOSS", trade.stop_loss, candle_close_time
             if hit_sl:
-                return "LOSS", trade.stop_loss, candle.close_time.replace(tzinfo=None)
+                return "LOSS", trade.stop_loss, candle_close_time
             if hit_tp:
-                return "WIN", trade.take_profit, candle.close_time.replace(tzinfo=None)
+                return "WIN", trade.take_profit, candle_close_time
         else:
             hit_sl = candle.high >= trade.stop_loss
             hit_tp = candle.low <= trade.take_profit
             if hit_sl and hit_tp:
-                return "LOSS", trade.stop_loss, candle.close_time.replace(tzinfo=None)
+                return "LOSS", trade.stop_loss, candle_close_time
             if hit_sl:
-                return "LOSS", trade.stop_loss, candle.close_time.replace(tzinfo=None)
+                return "LOSS", trade.stop_loss, candle_close_time
             if hit_tp:
-                return "WIN", trade.take_profit, candle.close_time.replace(tzinfo=None)
+                return "WIN", trade.take_profit, candle_close_time
     return None
 
 
@@ -219,17 +222,15 @@ def run_daily_summary() -> str:
     tz = ZoneInfo(settings.timezone)
     now_local = datetime.now(tz)
     target_date = (now_local - timedelta(days=1)).date()
-    start_local = datetime(target_date.year, target_date.month, target_date.day, tzinfo=tz)
+    start_local = datetime(target_date.year, target_date.month, target_date.day)
     end_local = start_local + timedelta(days=1)
-    start_utc = start_local.astimezone(UTC).replace(tzinfo=None)
-    end_utc = end_local.astimezone(UTC).replace(tzinfo=None)
 
     with SessionLocal() as session:
         trades = session.execute(
             select(TradeSignal).where(
                 TradeSignal.status == "CLOSED",
-                TradeSignal.close_time >= start_utc,
-                TradeSignal.close_time < end_utc,
+                TradeSignal.close_time >= start_local,
+                TradeSignal.close_time < end_local,
             )
         ).scalars().all()
 

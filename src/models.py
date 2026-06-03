@@ -6,6 +6,7 @@ from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db import Base
+from src.time_utils import local_now_naive
 
 
 class TradeSignal(Base):
@@ -31,8 +32,8 @@ class TradeSignal(Base):
     outcome: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     pnl_r: Mapped[float | None] = mapped_column(Float, nullable=True)
     telegram_sent: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now_naive, onupdate=local_now_naive)
 
 
 class DailySummary(Base):
@@ -46,7 +47,7 @@ class DailySummary(Base):
     winrate: Mapped[float] = mapped_column(Float)
     total_r: Mapped[float] = mapped_column(Float)
     notes: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now_naive)
 
 
 class StrategyInsight(Base):
@@ -54,7 +55,7 @@ class StrategyInsight(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     trade_signal_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
-    generated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now_naive, index=True)
     scope: Mapped[str] = mapped_column(String(30), index=True, default="rolling_30")
     winrate: Mapped[float] = mapped_column(Float)
     total_trades: Mapped[int] = mapped_column(Integer)
