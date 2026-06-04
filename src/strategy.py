@@ -17,6 +17,8 @@ class Pivot:
 class SignalSetup:
     side: str
     bias: str
+    execution_timeframe: str
+    higher_timeframe: str
     signal_score: int
     entry_price: float
     stop_loss: float
@@ -57,14 +59,14 @@ def detect_pivots(candles: list[Candle], lookback: int = 2) -> list[Pivot]:
 
 def structure_bias(candles: list[Candle]) -> str:
     pivots = detect_pivots(candles, lookback=3)
-    pivot_highs = [p for p in pivots if p.kind == "high"]
-    pivot_lows = [p for p in pivots if p.kind == "low"]
+    pivot_highs = [pivot for pivot in pivots if pivot.kind == "high"]
+    pivot_lows = [pivot for pivot in pivots if pivot.kind == "low"]
     if len(pivot_highs) < 2 or len(pivot_lows) < 2:
         return "neutral"
 
     last_highs = pivot_highs[-2:]
     last_lows = pivot_lows[-2:]
-    close_values = [c.close for c in candles[-60:]]
+    close_values = [candle.close for candle in candles[-60:]]
     ema50 = ema(close_values, min(50, len(close_values)))
     last_close = candles[-1].close
 
@@ -86,7 +88,8 @@ def bullish_confirmation(last_candle: Candle, prev_candle: Candle) -> bool:
     )
     pin_bar = (
         last_candle.close > last_candle.open
-        and (min(last_candle.close, last_candle.open) - last_candle.low) > (last_candle.high - max(last_candle.close, last_candle.open)) * 1.5
+        and (min(last_candle.close, last_candle.open) - last_candle.low)
+        > (last_candle.high - max(last_candle.close, last_candle.open)) * 1.5
     )
     return bullish_engulfing or pin_bar
 
@@ -100,27 +103,36 @@ def bearish_confirmation(last_candle: Candle, prev_candle: Candle) -> bool:
     )
     pin_bar = (
         last_candle.close < last_candle.open
-        and (last_candle.high - max(last_candle.close, last_candle.open)) > (min(last_candle.close, last_candle.open) - last_candle.low) * 1.5
+        and (last_candle.high - max(last_candle.close, last_candle.open))
+        > (min(last_candle.close, last_candle.open) - last_candle.low) * 1.5
     )
     return bearish_engulfing or pin_bar
 
 
-def build_signal(lower_tf: list[Candle], higher_tf: list[Candle], risk_reward: float, min_signal_score: int) -> SignalSetup | None:
+def build_signal(
+    lower_tf: list[Candle],
+    higher_tf: list[Candle],
+    risk_reward: float,
+    min_signal_score: int,
+    execution_timeframe: str,
+    higher_timeframe: str,
+    strategy_version: str,
+) -> SignalSetup | None:
     bias = structure_bias(higher_tf)
     if bias == "neutral":
         return None
 
     pivots = detect_pivots(lower_tf)
-    lows = [p for p in pivots if p.kind == "low"]
-    highs = [p for p in pivots if p.kind == "high"]
+    lows = [pivot for pivot in pivots if pivot.kind == "low"]
+    highs = [pivot for pivot in pivots if pivot.kind == "high"]
     if len(lows) < 2 or len(highs) < 2:
         return None
 
     last_candle = lower_tf[-1]
     prev_candle = lower_tf[-2]
     recent_close = last_candle.close
-    recent_high = max(c.high for c in lower_tf[-12:])
-    recent_low = min(c.low for c in lower_tf[-12:])
+    recent_high = max(candle.high for candle in lower_tf[-12:])
+    recent_low = min(candle.low for candle in lower_tf[-12:])
 
     if bias == "bullish":
         previous_high = highs[-2].price
@@ -142,12 +154,19 @@ def build_signal(lower_tf: list[Candle], higher_tf: list[Candle], risk_reward: f
         if risk <= 0:
             return None
         take_profit = entry + risk * risk_reward
-        score = int(impulse_high > previous_high) + int(last_candle.volume > prev_candle.volume) + int(bullish_confirmation(last_candle, prev_candle)) + int(recent_low > swing_low * 0.995)
+        score = (
+            int(impulse_high > previous_high)
+            + int(last_candle.volume > prev_candle.volume)
+            + int(bullish_confirmation(last_candle, prev_candle))
+            + int(recent_low > swing_low * 0.995)
+        )
         if score < min_signal_score:
             return None
         return SignalSetup(
             side="LONG",
             bias=bias,
+            execution_timeframe=execution_timeframe,
+            higher_timeframe=higher_timeframe,
             signal_score=score,
             entry_price=entry,
             stop_loss=stop_loss,
@@ -159,6 +178,7 @@ def build_signal(lower_tf: list[Candle], higher_tf: list[Candle], risk_reward: f
             zone_low=zone_low,
             zone_high=zone_high,
             trigger_candle_time=last_candle.close_time.isoformat(),
+            strategy_version=strategy_version,
         )
 
     previous_low = lows[-2].price
@@ -180,12 +200,19 @@ def build_signal(lower_tf: list[Candle], higher_tf: list[Candle], risk_reward: f
     if risk <= 0:
         return None
     take_profit = entry - risk * risk_reward
-    score = int(impulse_low < previous_low) + int(last_candle.volume > prev_candle.volume) + int(bearish_confirmation(last_candle, prev_candle)) + int(recent_high < swing_high * 1.005)
+    score = (
+        int(impulse_low < previous_low)
+        + int(last_candle.volume > prev_candle.volume)
+        + int(bearish_confirmation(last_candle, prev_candle))
+        + int(recent_high < swing_high * 1.005)
+    )
     if score < min_signal_score:
         return None
     return SignalSetup(
         side="SHORT",
         bias=bias,
+        execution_timeframe=execution_timeframe,
+        higher_timeframe=higher_timeframe,
         signal_score=score,
         entry_price=entry,
         stop_loss=stop_loss,
@@ -197,4 +224,5 @@ def build_signal(lower_tf: list[Candle], higher_tf: list[Candle], risk_reward: f
         zone_low=zone_low,
         zone_high=zone_high,
         trigger_candle_time=last_candle.close_time.isoformat(),
+        strategy_version=strategy_version,
     )

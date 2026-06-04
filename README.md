@@ -9,6 +9,11 @@ The bot uses two timeframes:
 - `4h`: determines the higher-timeframe bias using market structure and EMA50.
 - `15m`: looks for break of structure, pullback into value, and price action confirmation.
 
+The bot can also scan a larger swing setup layer:
+
+- `1d`: determines the swing bias.
+- `4h`: looks for swing entries using the same structure and pullback logic.
+
 A valid setup requires:
 
 1. Higher-timeframe bias is aligned.
@@ -23,8 +28,9 @@ The bot uses three jobs:
 
 1. Signal scan every 15 minutes.
    The bot sends a Telegram message only when a valid signal is found.
+   It can scan both intraday and swing setups in the same execution.
 2. Trade evaluation on a 15-minute cycle offset from the scan.
-   This checks whether open trades hit `TP` or `SL`, updates rolling win rate, and stores improvement recommendations when performance is weak.
+   This checks whether open trades hit `TP` or `SL`, updates rolling win rate separately for intraday and swing trades, and stores improvement recommendations when performance is weak.
 3. Daily summary at `00:05` Asia/Bangkok time.
    This summarizes the previous trading day.
 
@@ -84,6 +90,12 @@ Optional settings:
 - `HIGHER_TIMEFRAME`
 - `RISK_REWARD`
 - `MIN_SIGNAL_SCORE`
+- `SWING_ENABLED`
+- `SWING_TIMEFRAME`
+- `SWING_HIGHER_TIMEFRAME`
+- `SWING_RISK_REWARD`
+- `SWING_MIN_SIGNAL_SCORE`
+- `MAX_OPEN_TRADES_PER_TIMEFRAME`
 - `WINRATE_ALERT_THRESHOLD`
 - `TIMEZONE`
 - `SEND_SCAN_STATUS_WHEN_NO_SIGNAL`

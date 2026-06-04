@@ -20,29 +20,40 @@ def init_db() -> None:
     ensure_schema_updates()
 
 
-def has_open_trade(session) -> bool:
-    stmt = select(TradeSignal).where(TradeSignal.symbol == settings.symbol, TradeSignal.status == "OPEN")
-    return session.execute(stmt).scalar_one_or_none() is not None
+def open_trade_count(session, timeframe: str) -> int:
+    stmt = select(TradeSignal).where(
+        TradeSignal.symbol == settings.symbol,
+        TradeSignal.status == "OPEN",
+        TradeSignal.timeframe == timeframe,
+    )
+    return len(session.execute(stmt).scalars().all())
 
 
-def latest_duplicate(session, side: str, trigger_time: datetime) -> bool:
+def latest_duplicate(session, side: str, trigger_time: datetime, timeframe: str) -> bool:
     stmt = (
         select(TradeSignal)
-        .where(TradeSignal.symbol == settings.symbol, TradeSignal.side == side)
+        .where(
+            TradeSignal.symbol == settings.symbol,
+            TradeSignal.side == side,
+            TradeSignal.timeframe == timeframe,
+        )
         .order_by(desc(TradeSignal.signal_time))
         .limit(1)
     )
     signal = session.execute(stmt).scalar_one_or_none()
     if signal is None:
         return False
-    return abs((signal.signal_time - trigger_time.replace(tzinfo=None)).total_seconds()) < 60 * 60
+    return abs((signal.signal_time - trigger_time).total_seconds()) < 60 * 60
 
 
 def format_signal_message(signal: TradeSignal) -> str:
+    side_label = {"LONG": "MUA", "SHORT": "BAN"}.get(signal.side, signal.side)
+    bias_label = {"bullish": "Tăng", "bearish": "Giảm", "neutral": "Trung lập"}.get(signal.bias, signal.bias)
     return (
-        f"[{signal.symbol}] Tín hiệu {signal.side}\n"
-        f"Xu hướng chính: {signal.bias}\n"
-        f"Khung thời gian: {signal.timeframe}\n"
+        f"[{signal.symbol}] Tín hiệu {side_label}\n"
+        f"Xu hướng chính: {bias_label}\n"
+        f"Khung vào lệnh: {signal.timeframe}\n"
+        f"Loại setup: {signal.strategy_version}\n"
         f"Điểm vào lệnh: {signal.entry_price:.2f}\n"
         f"SL: {signal.stop_loss:.2f}\n"
         f"TP: {signal.take_profit:.2f}\n"
@@ -52,58 +63,96 @@ def format_signal_message(signal: TradeSignal) -> str:
     )
 
 
-def send_scan_status_message(message: str) -> None:
-    if settings.send_scan_status_when_no_signal:
-        send_telegram_message(
-            settings.telegram_bot_token,
-            settings.telegram_chat_id,
-            message,
+def signal_scan_configs() -> list[dict[str, str | float | int]]:
+    configs: list[dict[str, str | float | int]] = [
+        {
+            "label": "intraday",
+            "timeframe": settings.timeframe,
+            "higher_timeframe": settings.higher_timeframe,
+            "risk_reward": settings.risk_reward,
+            "min_signal_score": settings.min_signal_score,
+            "strategy_version": "intraday",
+        }
+    ]
+    if settings.swing_enabled:
+        configs.append(
+            {
+                "label": "swing",
+                "timeframe": settings.swing_timeframe,
+                "higher_timeframe": settings.swing_higher_timeframe,
+                "risk_reward": settings.swing_risk_reward,
+                "min_signal_score": settings.swing_min_signal_score,
+                "strategy_version": "swing",
+            }
         )
+    return configs
+
+
+def strategy_min_score(strategy_version: str) -> int:
+    if strategy_version == "swing":
+        return settings.swing_min_signal_score
+    return settings.min_signal_score
 
 
 def run_signal_scan() -> str:
     init_db()
-    higher_tf = fetch_klines(settings.symbol, settings.higher_timeframe, limit=220)
-    lower_tf = fetch_klines(settings.symbol, settings.timeframe, limit=300)
-    setup = build_signal(lower_tf, higher_tf, settings.risk_reward, settings.min_signal_score)
-    if setup is None:
-        return "No trade setup found."
-
-    trigger_time = utc_to_local_naive(datetime.fromisoformat(setup.trigger_candle_time))
+    created_signals: list[int] = []
     with SessionLocal() as session:
-        if has_open_trade(session):
-            return "Skipped because an open trade already exists."
-        if latest_duplicate(session, setup.side, trigger_time):
-            return "Skipped duplicate signal."
+        for config in signal_scan_configs():
+            timeframe = str(config["timeframe"])
+            higher_timeframe = str(config["higher_timeframe"])
+            higher_tf = fetch_klines(settings.symbol, higher_timeframe, limit=220)
+            lower_tf = fetch_klines(settings.symbol, timeframe, limit=300)
+            setup = build_signal(
+                lower_tf=lower_tf,
+                higher_tf=higher_tf,
+                risk_reward=float(config["risk_reward"]),
+                min_signal_score=int(config["min_signal_score"]),
+                execution_timeframe=timeframe,
+                higher_timeframe=higher_timeframe,
+                strategy_version=str(config["strategy_version"]),
+            )
+            if setup is None:
+                continue
 
-        signal = TradeSignal(
-            symbol=settings.symbol,
-            timeframe=settings.timeframe,
-            side=setup.side,
-            status="OPEN",
-            bias=setup.bias,
-            strategy_version=setup.strategy_version,
-            signal_time=trigger_time,
-            entry_price=setup.entry_price,
-            stop_loss=setup.stop_loss,
-            take_profit=setup.take_profit,
-            risk_reward=setup.risk_reward,
-            signal_score=setup.signal_score,
-            reason=setup.reason,
-            setup_json=setup.to_json(),
-        )
-        session.add(signal)
-        session.commit()
-        session.refresh(signal)
+            trigger_time = utc_to_local_naive(datetime.fromisoformat(setup.trigger_candle_time))
+            if open_trade_count(session, timeframe) >= settings.max_open_trades_per_timeframe:
+                continue
+            if latest_duplicate(session, setup.side, trigger_time, timeframe):
+                continue
 
-        send_telegram_message(
-            settings.telegram_bot_token,
-            settings.telegram_chat_id,
-            format_signal_message(signal),
-        )
-        signal.telegram_sent = True
-        session.commit()
-        return f"Created signal #{signal.id}."
+            signal = TradeSignal(
+                symbol=settings.symbol,
+                timeframe=timeframe,
+                side=setup.side,
+                status="OPEN",
+                bias=setup.bias,
+                strategy_version=setup.strategy_version,
+                signal_time=trigger_time,
+                entry_price=setup.entry_price,
+                stop_loss=setup.stop_loss,
+                take_profit=setup.take_profit,
+                risk_reward=setup.risk_reward,
+                signal_score=setup.signal_score,
+                reason=setup.reason,
+                setup_json=setup.to_json(),
+            )
+            session.add(signal)
+            session.commit()
+            session.refresh(signal)
+
+            send_telegram_message(
+                settings.telegram_bot_token,
+                settings.telegram_chat_id,
+                format_signal_message(signal),
+            )
+            signal.telegram_sent = True
+            session.commit()
+            created_signals.append(signal.id)
+
+    if not created_signals:
+        return "No trade setup found."
+    return f"Created signals: {', '.join(str(signal_id) for signal_id in created_signals)}."
 
 
 def resolve_trade_with_candles(trade: TradeSignal, candles: list[Candle]) -> tuple[str, float, datetime] | None:
@@ -135,23 +184,24 @@ def resolve_trade_with_candles(trade: TradeSignal, candles: list[Candle]) -> tup
 
 def build_recommendation(closed_trades: list[TradeSignal], winrate: float) -> str:
     if not closed_trades:
-        return "Chưa có đủ dữ liệu để đưa ra đề xuất."
+        return "Chua co du du lieu de dua ra de xuat."
 
+    score_threshold = strategy_min_score(closed_trades[0].strategy_version)
     by_side = Counter(trade.side for trade in closed_trades if trade.outcome == "LOSS")
-    by_score = Counter("low_score" if trade.signal_score <= settings.min_signal_score else "high_score" for trade in closed_trades if trade.outcome == "LOSS")
+    by_score = Counter("low_score" if trade.signal_score <= score_threshold else "high_score" for trade in closed_trades if trade.outcome == "LOSS")
     recommendations: list[str] = []
 
     if winrate < settings.winrate_alert_threshold:
-        recommendations.append("Winrate đang dưới ngưỡng, nên lọc chặt hơn các lệnh có điểm thấp.")
+        recommendations.append("Winrate dang duoi nguong, nen loc chat hon cac lenh co diem thap.")
         if by_score["low_score"] >= by_score["high_score"]:
-            recommendations.append(f"Tăng MIN_SIGNAL_SCORE lên {settings.min_signal_score + 1} để loại bớt các setup yếu.")
+            recommendations.append(f"Tang MIN_SIGNAL_SCORE len {score_threshold + 1} de loai bot cac setup yeu.")
         if by_side["LONG"] > by_side["SHORT"]:
-            recommendations.append("Lệnh LONG đang thua nhiều hơn, nên ưu tiên giao dịch khi xu hướng giảm thật rõ.")
+            recommendations.append("Lenh LONG dang thua nhieu hon, nen uu tien giao dich khi xu huong giam that ro.")
         elif by_side["SHORT"] > by_side["LONG"]:
-            recommendations.append("Lệnh SHORT đang thua nhiều hơn, nên ưu tiên giao dịch khi xu hướng tăng thật rõ.")
-        recommendations.append("Có thể thêm bộ lọc ATR hoặc chỉ giao dịch khi volume cao hơn trung bình 20 nến.")
+            recommendations.append("Lenh SHORT dang thua nhieu hon, nen uu tien giao dich khi xu huong tang that ro.")
+        recommendations.append("Co the them bo loc ATR hoac chi giao dich khi volume cao hon trung binh 20 nen.")
     else:
-        recommendations.append("Winrate đang ổn. Tạm thời giữ nguyên logic và tiếp tục thu thập thêm dữ liệu.")
+        recommendations.append("Winrate dang on. Tam thoi giu nguyen logic va tiep tuc thu thap them du lieu.")
 
     return " ".join(recommendations)
 
@@ -160,10 +210,12 @@ def run_trade_evaluation() -> str:
     init_db()
     with SessionLocal() as session:
         open_trades = session.execute(select(TradeSignal).where(TradeSignal.status == "OPEN")).scalars().all()
-        candles = fetch_klines(settings.symbol, settings.timeframe, limit=500)
+        candles_by_timeframe: dict[str, list[Candle]] = {}
         closed_now = 0
         for trade in open_trades:
-            result = resolve_trade_with_candles(trade, candles)
+            if trade.timeframe not in candles_by_timeframe:
+                candles_by_timeframe[trade.timeframe] = fetch_klines(settings.symbol, trade.timeframe, limit=500)
+            result = resolve_trade_with_candles(trade, candles_by_timeframe[trade.timeframe])
             if result is None:
                 continue
             outcome, close_price, close_time = result
@@ -176,45 +228,69 @@ def run_trade_evaluation() -> str:
 
         session.commit()
 
-        closed_trades = session.execute(
-            select(TradeSignal)
-            .where(TradeSignal.status == "CLOSED")
-            .order_by(desc(TradeSignal.close_time))
-            .limit(30)
+        all_closed_trades = session.execute(
+            select(TradeSignal).where(TradeSignal.status == "CLOSED")
         ).scalars().all()
-        if not closed_trades:
+        if not all_closed_trades:
             return "No closed trades available yet."
 
-        wins = sum(1 for trade in closed_trades if trade.outcome == "WIN")
-        winrate = round((wins / len(closed_trades)) * 100, 2)
-        recommendation = build_recommendation(closed_trades, winrate)
         recently_closed = [trade for trade in open_trades if trade.status == "CLOSED"]
+        strategy_summaries: dict[str, tuple[float, int, str]] = {}
         for trade in recently_closed:
+            closed_trades = [
+                candidate
+                for candidate in sorted(
+                    all_closed_trades,
+                    key=lambda item: item.close_time or datetime.min,
+                    reverse=True,
+                )
+                if candidate.strategy_version == trade.strategy_version
+            ][:30]
+            wins = sum(1 for candidate in closed_trades if candidate.outcome == "WIN")
+            winrate = round((wins / len(closed_trades)) * 100, 2)
+            recommendation = build_recommendation(closed_trades, winrate)
+            strategy_summaries[trade.strategy_version] = (winrate, len(closed_trades), recommendation)
             insight = session.execute(
                 select(StrategyInsight).where(StrategyInsight.trade_signal_id == trade.id)
             ).scalar_one_or_none()
             if insight is None:
                 insight = StrategyInsight(
                     trade_signal_id=trade.id,
-                    scope="rolling_30",
+                    scope=trade.strategy_version,
                     winrate=winrate,
                     total_trades=len(closed_trades),
                     recommendation=recommendation,
                 )
                 session.add(insight)
             else:
+                insight.scope = trade.strategy_version
                 insight.winrate = winrate
                 insight.total_trades = len(closed_trades)
                 insight.recommendation = recommendation
         session.commit()
 
         if closed_now > 0:
+            summary_lines = []
+            for strategy_version, (winrate, total_trades, recommendation) in sorted(strategy_summaries.items()):
+                summary_lines.append(
+                    f"{strategy_version}: {winrate:.2f}% tren {total_trades} lenh. De xuat: {recommendation}"
+                )
             send_telegram_message(
                 settings.telegram_bot_token,
                 settings.telegram_chat_id,
-                f"Cập nhật kết quả lệnh.\nSố lệnh vừa đóng: {closed_now}\nWinrate 30 lệnh gần nhất: {winrate:.2f}%\nĐề xuất: {recommendation}",
+                (
+                    f"Cap nhat ket qua lenh.\n"
+                    f"So lenh vua dong: {closed_now}\n"
+                    + "\n".join(summary_lines)
+                ),
             )
-        return f"Closed now: {closed_now}. Rolling winrate: {winrate:.2f}%."
+        if strategy_summaries:
+            compact = ", ".join(
+                f"{strategy_version}={winrate:.2f}%/{total_trades}"
+                for strategy_version, (winrate, total_trades, _) in sorted(strategy_summaries.items())
+            )
+            return f"Closed now: {closed_now}. Strategy winrates: {compact}."
+        return f"Closed now: {closed_now}."
 
 
 def run_daily_summary() -> str:
@@ -239,7 +315,7 @@ def run_daily_summary() -> str:
         losses = sum(1 for trade in trades if trade.outcome == "LOSS")
         total_r = round(sum(trade.pnl_r or 0 for trade in trades), 2)
         winrate = round((wins / total) * 100, 2) if total else 0.0
-        notes = "Ngày này không có lệnh đóng." if total == 0 else "Báo cáo tự động theo kết quả các lệnh đã đóng trong ngày."
+        notes = "Ngay nay khong co lenh dong." if total == 0 else "Bao cao tu dong theo ket qua cac lenh da dong trong ngay."
 
         existing = session.execute(select(DailySummary).where(DailySummary.summary_date == target_date)).scalar_one_or_none()
         if existing is None:
@@ -265,6 +341,13 @@ def run_daily_summary() -> str:
         send_telegram_message(
             settings.telegram_bot_token,
             settings.telegram_chat_id,
-            f"Báo cáo ngày {target_date}\nTổng lệnh: {total}\nLệnh thắng: {wins}\nLệnh thua: {losses}\nWinrate: {winrate:.2f}%\nTổng R: {total_r:.2f}",
+            (
+                f"Bao cao ngay {target_date}\n"
+                f"Tong lenh: {total}\n"
+                f"Lenh thang: {wins}\n"
+                f"Lenh thua: {losses}\n"
+                f"Winrate: {winrate:.2f}%\n"
+                f"Tong R: {total_r:.2f}"
+            ),
         )
         return f"Daily summary updated for {target_date}."
