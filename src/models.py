@@ -18,7 +18,7 @@ class TradeSignal(Base):
     side: Mapped[str] = mapped_column(String(10), index=True)
     status: Mapped[str] = mapped_column(String(20), index=True, default="OPEN")
     bias: Mapped[str] = mapped_column(String(10))
-    strategy_version: Mapped[str] = mapped_column(String(20), default="v1")
+    strategy_version: Mapped[str] = mapped_column(String(20), default="intraday")
     signal_time: Mapped[datetime] = mapped_column(DateTime, index=True)
     entry_price: Mapped[float] = mapped_column(Float)
     stop_loss: Mapped[float] = mapped_column(Float)

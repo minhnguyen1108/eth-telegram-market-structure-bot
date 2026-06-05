@@ -37,6 +37,41 @@ def ensure_schema_updates() -> None:
             connection.execute(text("ALTER TABLE strategy_insights ADD COLUMN IF NOT EXISTS trade_signal_id INTEGER"))
             connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_strategy_insights_trade_signal_id ON strategy_insights(trade_signal_id)"))
 
+        legacy_strategy_key = "legacy_strategy_versions_normalized_v2"
+        legacy_strategy_migrated = connection.execute(
+            text("SELECT value FROM app_metadata WHERE key = :key"),
+            {"key": legacy_strategy_key},
+        ).scalar_one_or_none()
+        if legacy_strategy_migrated != "done":
+            connection.execute(
+                text(
+                    "UPDATE trade_signals "
+                    "SET strategy_version = CASE "
+                    "WHEN strategy_version IN ('v1', 'v1_intraday') THEN 'intraday' "
+                    "WHEN strategy_version = 'v1_swing' THEN 'swing' "
+                    "ELSE strategy_version END "
+                    "WHERE strategy_version IN ('v1', 'v1_intraday', 'v1_swing')"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE strategy_insights "
+                    "SET scope = CASE "
+                    "WHEN scope IN ('v1', 'v1_intraday', 'rolling_30') THEN 'intraday' "
+                    "WHEN scope = 'v1_swing' THEN 'swing' "
+                    "ELSE scope END "
+                    "WHERE scope IN ('v1', 'v1_intraday', 'v1_swing', 'rolling_30')"
+                )
+            )
+            connection.execute(
+                text("INSERT OR REPLACE INTO app_metadata(key, value) VALUES (:key, 'done')") if dialect == "sqlite"
+                else text(
+                    "INSERT INTO app_metadata(key, value) VALUES (:key, 'done') "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+                ),
+                {"key": legacy_strategy_key},
+            )
+
         migration_key = "timezone_migrated_to_asia_bangkok_v1"
         migrated = connection.execute(
             text("SELECT value FROM app_metadata WHERE key = :key"),

@@ -46,14 +46,23 @@ def latest_duplicate(session, side: str, trigger_time: datetime, timeframe: str)
     return abs((signal.signal_time - trigger_time).total_seconds()) < 60 * 60
 
 
+def normalize_strategy_version(strategy_version: str | None) -> str:
+    if strategy_version in {"v1", "v1_intraday", None, ""}:
+        return "intraday"
+    if strategy_version == "v1_swing":
+        return "swing"
+    return strategy_version
+
+
 def format_signal_message(signal: TradeSignal) -> str:
     side_label = {"LONG": "MUA", "SHORT": "BÁN"}.get(signal.side, signal.side)
     bias_label = {"bullish": "Tăng", "bearish": "Giảm", "neutral": "Trung lập"}.get(signal.bias, signal.bias)
+    strategy_version = normalize_strategy_version(signal.strategy_version)
     return (
         f"[{signal.symbol}] Tín hiệu {side_label}\n"
         f"Xu hướng chính: {bias_label}\n"
         f"Khung vào lệnh: {signal.timeframe}\n"
-        f"Loại setup: {signal.strategy_version}\n"
+        f"Loại setup: {strategy_version}\n"
         f"Điểm vào lệnh: {signal.entry_price:.2f}\n"
         f"SL: {signal.stop_loss:.2f}\n"
         f"TP: {signal.take_profit:.2f}\n"
@@ -89,7 +98,7 @@ def signal_scan_configs() -> list[dict[str, str | float | int]]:
 
 
 def strategy_min_score(strategy_version: str) -> int:
-    if strategy_version == "swing":
+    if normalize_strategy_version(strategy_version) == "swing":
         return settings.swing_min_signal_score
     return settings.min_signal_score
 
@@ -228,6 +237,7 @@ def run_trade_evaluation() -> str:
             trade.close_price = close_price
             trade.close_time = close_time
             trade.pnl_r = trade.risk_reward if outcome == "WIN" else -1.0
+            trade.strategy_version = normalize_strategy_version(trade.strategy_version)
             closed_now += 1
 
         session.commit()
@@ -248,26 +258,27 @@ def run_trade_evaluation() -> str:
                     key=lambda item: item.close_time or datetime.min,
                     reverse=True,
                 )
-                if candidate.strategy_version == trade.strategy_version
+                if normalize_strategy_version(candidate.strategy_version) == normalize_strategy_version(trade.strategy_version)
             ][:30]
             wins = sum(1 for candidate in closed_trades if candidate.outcome == "WIN")
             winrate = round((wins / len(closed_trades)) * 100, 2)
             recommendation = build_recommendation(closed_trades, winrate)
-            strategy_summaries[trade.strategy_version] = (winrate, len(closed_trades), recommendation)
+            strategy_version = normalize_strategy_version(trade.strategy_version)
+            strategy_summaries[strategy_version] = (winrate, len(closed_trades), recommendation)
             insight = session.execute(
                 select(StrategyInsight).where(StrategyInsight.trade_signal_id == trade.id)
             ).scalar_one_or_none()
             if insight is None:
                 insight = StrategyInsight(
                     trade_signal_id=trade.id,
-                    scope=trade.strategy_version,
+                    scope=strategy_version,
                     winrate=winrate,
                     total_trades=len(closed_trades),
                     recommendation=recommendation,
                 )
                 session.add(insight)
             else:
-                insight.scope = trade.strategy_version
+                insight.scope = strategy_version
                 insight.winrate = winrate
                 insight.total_trades = len(closed_trades)
                 insight.recommendation = recommendation

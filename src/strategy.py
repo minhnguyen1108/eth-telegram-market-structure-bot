@@ -30,7 +30,7 @@ class SignalSetup:
     zone_low: float
     zone_high: float
     trigger_candle_time: str
-    strategy_version: str = "v1"
+    strategy_version: str = "intraday"
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=True)
