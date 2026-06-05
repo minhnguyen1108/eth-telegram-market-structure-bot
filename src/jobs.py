@@ -47,7 +47,7 @@ def latest_duplicate(session, side: str, trigger_time: datetime, timeframe: str)
 
 
 def format_signal_message(signal: TradeSignal) -> str:
-    side_label = {"LONG": "MUA", "SHORT": "BAN"}.get(signal.side, signal.side)
+    side_label = {"LONG": "MUA", "SHORT": "BÁN"}.get(signal.side, signal.side)
     bias_label = {"bullish": "Tăng", "bearish": "Giảm", "neutral": "Trung lập"}.get(signal.bias, signal.bias)
     return (
         f"[{signal.symbol}] Tín hiệu {side_label}\n"
@@ -184,7 +184,7 @@ def resolve_trade_with_candles(trade: TradeSignal, candles: list[Candle]) -> tup
 
 def build_recommendation(closed_trades: list[TradeSignal], winrate: float) -> str:
     if not closed_trades:
-        return "Chua co du du lieu de dua ra de xuat."
+        return "Chưa có đủ dữ liệu để đưa ra đề xuất."
 
     score_threshold = strategy_min_score(closed_trades[0].strategy_version)
     by_side = Counter(trade.side for trade in closed_trades if trade.outcome == "LOSS")
@@ -192,16 +192,16 @@ def build_recommendation(closed_trades: list[TradeSignal], winrate: float) -> st
     recommendations: list[str] = []
 
     if winrate < settings.winrate_alert_threshold:
-        recommendations.append("Winrate dang duoi nguong, nen loc chat hon cac lenh co diem thap.")
+        recommendations.append("Winrate đang dưới ngưỡng, nên lọc chặt hơn các lệnh có điểm thấp.")
         if by_score["low_score"] >= by_score["high_score"]:
-            recommendations.append(f"Tang MIN_SIGNAL_SCORE len {score_threshold + 1} de loai bot cac setup yeu.")
+            recommendations.append(f"Tăng MIN_SIGNAL_SCORE lên {score_threshold + 1} để loại bớt các setup yếu.")
         if by_side["LONG"] > by_side["SHORT"]:
-            recommendations.append("Lenh LONG dang thua nhieu hon, nen uu tien giao dich khi xu huong giam that ro.")
+            recommendations.append("Lệnh LONG đang thua nhiều hơn, nên ưu tiên giao dịch khi xu hướng giảm thật rõ.")
         elif by_side["SHORT"] > by_side["LONG"]:
-            recommendations.append("Lenh SHORT dang thua nhieu hon, nen uu tien giao dich khi xu huong tang that ro.")
-        recommendations.append("Co the them bo loc ATR hoac chi giao dich khi volume cao hon trung binh 20 nen.")
+            recommendations.append("Lệnh SHORT đang thua nhiều hơn, nên ưu tiên giao dịch khi xu hướng tăng thật rõ.")
+        recommendations.append("Có thể thêm bộ lọc ATR hoặc chỉ giao dịch khi volume cao hơn trung bình 20 nến.")
     else:
-        recommendations.append("Winrate dang on. Tam thoi giu nguyen logic va tiep tuc thu thap them du lieu.")
+        recommendations.append("Winrate đang ổn. Tạm thời giữ nguyên logic và tiếp tục thu thập thêm dữ liệu.")
 
     return " ".join(recommendations)
 
@@ -273,14 +273,14 @@ def run_trade_evaluation() -> str:
             summary_lines = []
             for strategy_version, (winrate, total_trades, recommendation) in sorted(strategy_summaries.items()):
                 summary_lines.append(
-                    f"{strategy_version}: {winrate:.2f}% tren {total_trades} lenh. De xuat: {recommendation}"
+                    f"{strategy_version}: {winrate:.2f}% trên {total_trades} lệnh. Đề xuất: {recommendation}"
                 )
             send_telegram_message(
                 settings.telegram_bot_token,
                 settings.telegram_chat_id,
                 (
-                    f"Cap nhat ket qua lenh.\n"
-                    f"So lenh vua dong: {closed_now}\n"
+                    f"Cập nhật kết quả lệnh.\n"
+                    f"Số lệnh vừa đóng: {closed_now}\n"
                     + "\n".join(summary_lines)
                 ),
             )
@@ -315,7 +315,7 @@ def run_daily_summary() -> str:
         losses = sum(1 for trade in trades if trade.outcome == "LOSS")
         total_r = round(sum(trade.pnl_r or 0 for trade in trades), 2)
         winrate = round((wins / total) * 100, 2) if total else 0.0
-        notes = "Ngay nay khong co lenh dong." if total == 0 else "Bao cao tu dong theo ket qua cac lenh da dong trong ngay."
+        notes = "Ngày này không có lệnh đóng." if total == 0 else "Báo cáo tự động theo kết quả các lệnh đã đóng trong ngày."
 
         existing = session.execute(select(DailySummary).where(DailySummary.summary_date == target_date)).scalar_one_or_none()
         if existing is None:
@@ -342,12 +342,12 @@ def run_daily_summary() -> str:
             settings.telegram_bot_token,
             settings.telegram_chat_id,
             (
-                f"Bao cao ngay {target_date}\n"
-                f"Tong lenh: {total}\n"
-                f"Lenh thang: {wins}\n"
-                f"Lenh thua: {losses}\n"
+                f"Báo cáo ngày {target_date}\n"
+                f"Tổng lệnh: {total}\n"
+                f"Lệnh thắng: {wins}\n"
+                f"Lệnh thua: {losses}\n"
                 f"Winrate: {winrate:.2f}%\n"
-                f"Tong R: {total_r:.2f}"
+                f"Tổng R: {total_r:.2f}"
             ),
         )
         return f"Daily summary updated for {target_date}."
