@@ -188,7 +188,11 @@ def build_recommendation(closed_trades: list[TradeSignal], winrate: float) -> st
 
     score_threshold = strategy_min_score(closed_trades[0].strategy_version)
     by_side = Counter(trade.side for trade in closed_trades if trade.outcome == "LOSS")
-    by_score = Counter("low_score" if trade.signal_score <= score_threshold else "high_score" for trade in closed_trades if trade.outcome == "LOSS")
+    by_score = Counter(
+        "low_score" if trade.signal_score <= score_threshold else "high_score"
+        for trade in closed_trades
+        if trade.outcome == "LOSS"
+    )
     recommendations: list[str] = []
 
     if winrate < settings.winrate_alert_threshold:
@@ -315,7 +319,11 @@ def run_daily_summary() -> str:
         losses = sum(1 for trade in trades if trade.outcome == "LOSS")
         total_r = round(sum(trade.pnl_r or 0 for trade in trades), 2)
         winrate = round((wins / total) * 100, 2) if total else 0.0
-        notes = "Ngày này không có lệnh đóng." if total == 0 else "Báo cáo tự động theo kết quả các lệnh đã đóng trong ngày."
+        notes = (
+            "Ngày này không có lệnh đóng."
+            if total == 0
+            else "Báo cáo tự động theo kết quả các lệnh đã đóng trong ngày."
+        )
 
         existing = session.execute(select(DailySummary).where(DailySummary.summary_date == target_date)).scalar_one_or_none()
         if existing is None:
