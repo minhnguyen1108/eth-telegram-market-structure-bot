@@ -219,6 +219,22 @@ def build_recommendation(closed_trades: list[TradeSignal], winrate: float) -> st
     return " ".join(recommendations)
 
 
+def format_closed_trade_detail(trade: TradeSignal) -> str:
+    strategy_version = normalize_strategy_version(trade.strategy_version)
+    side_label = {"LONG": "MUA", "SHORT": "BÁN"}.get(trade.side, trade.side)
+    outcome_label = {"WIN": "THẮNG", "LOSS": "THUA"}.get(trade.outcome or "", trade.outcome or "CHƯA RÕ")
+    close_reason = "Chạm TP" if trade.outcome == "WIN" else "Chạm SL" if trade.outcome == "LOSS" else "Đã đóng"
+    close_time = trade.close_time.strftime("%Y-%m-%d %H:%M") if trade.close_time else "Không rõ"
+    close_price = trade.close_price if trade.close_price is not None else 0.0
+    pnl_r = trade.pnl_r if trade.pnl_r is not None else 0.0
+    return (
+        f"#{trade.id} {strategy_version} {trade.timeframe} {side_label}: {outcome_label} ({close_reason})\n"
+        f"Thời gian đóng: {close_time}\n"
+        f"Entry: {trade.entry_price:.2f} | Giá đóng: {close_price:.2f} | PnL: {pnl_r:+.2f}R\n"
+        f"SL: {trade.stop_loss:.2f} | TP: {trade.take_profit:.2f}"
+    )
+
+
 def run_trade_evaluation() -> str:
     init_db()
     with SessionLocal() as session:
@@ -285,6 +301,7 @@ def run_trade_evaluation() -> str:
         session.commit()
 
         if closed_now > 0:
+            detail_lines = [format_closed_trade_detail(trade) for trade in recently_closed]
             summary_lines = []
             for strategy_version, (winrate, total_trades, recommendation) in sorted(strategy_summaries.items()):
                 summary_lines.append(
@@ -296,6 +313,9 @@ def run_trade_evaluation() -> str:
                 (
                     f"Cập nhật kết quả lệnh.\n"
                     f"Số lệnh vừa đóng: {closed_now}\n"
+                    f"Chi tiết lệnh vừa đóng:\n"
+                    + "\n\n".join(detail_lines)
+                    + "\n\nWinrate cập nhật:\n"
                     + "\n".join(summary_lines)
                 ),
             )
