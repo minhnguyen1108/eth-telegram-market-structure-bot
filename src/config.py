@@ -15,6 +15,7 @@ class Settings:
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
     symbol: str = os.getenv("SYMBOL", "ETHUSDT")
+    symbols_csv: str = os.getenv("SYMBOLS", os.getenv("SYMBOL", "ETHUSDT"))
     timeframe: str = os.getenv("TIMEFRAME", "15m")
     higher_timeframe: str = os.getenv("HIGHER_TIMEFRAME", "4h")
     risk_reward: float = float(os.getenv("RISK_REWARD", "2.0"))
@@ -28,6 +29,11 @@ class Settings:
     winrate_alert_threshold: float = float(os.getenv("WINRATE_ALERT_THRESHOLD", "45"))
     timezone: str = os.getenv("TIMEZONE", "Asia/Bangkok")
     send_scan_status_when_no_signal: bool = os.getenv("SEND_SCAN_STATUS_WHEN_NO_SIGNAL", "false").lower() == "true"
+
+    @property
+    def symbols(self) -> tuple[str, ...]:
+        symbols = tuple(symbol.strip().upper() for symbol in self.symbols_csv.split(",") if symbol.strip())
+        return symbols or (self.symbol.upper(),)
 
 
 settings = Settings()

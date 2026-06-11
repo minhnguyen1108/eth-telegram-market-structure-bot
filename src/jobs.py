@@ -20,20 +20,20 @@ def init_db() -> None:
     ensure_schema_updates()
 
 
-def open_trade_count(session, timeframe: str) -> int:
+def open_trade_count(session, symbol: str, timeframe: str) -> int:
     stmt = select(TradeSignal).where(
-        TradeSignal.symbol == settings.symbol,
+        TradeSignal.symbol == symbol,
         TradeSignal.status == "OPEN",
         TradeSignal.timeframe == timeframe,
     )
     return len(session.execute(stmt).scalars().all())
 
 
-def latest_duplicate(session, side: str, trigger_time: datetime, timeframe: str) -> bool:
+def latest_duplicate(session, symbol: str, side: str, trigger_time: datetime, timeframe: str) -> bool:
     stmt = (
         select(TradeSignal)
         .where(
-            TradeSignal.symbol == settings.symbol,
+            TradeSignal.symbol == symbol,
             TradeSignal.side == side,
             TradeSignal.timeframe == timeframe,
         )
@@ -107,57 +107,58 @@ def run_signal_scan() -> str:
     init_db()
     created_signals: list[int] = []
     with SessionLocal() as session:
-        for config in signal_scan_configs():
-            timeframe = str(config["timeframe"])
-            higher_timeframe = str(config["higher_timeframe"])
-            higher_tf = fetch_klines(settings.symbol, higher_timeframe, limit=220)
-            lower_tf = fetch_klines(settings.symbol, timeframe, limit=300)
-            setup = build_signal(
-                lower_tf=lower_tf,
-                higher_tf=higher_tf,
-                risk_reward=float(config["risk_reward"]),
-                min_signal_score=int(config["min_signal_score"]),
-                execution_timeframe=timeframe,
-                higher_timeframe=higher_timeframe,
-                strategy_version=str(config["strategy_version"]),
-            )
-            if setup is None:
-                continue
+        for symbol in settings.symbols:
+            for config in signal_scan_configs():
+                timeframe = str(config["timeframe"])
+                higher_timeframe = str(config["higher_timeframe"])
+                higher_tf = fetch_klines(symbol, higher_timeframe, limit=220)
+                lower_tf = fetch_klines(symbol, timeframe, limit=300)
+                setup = build_signal(
+                    lower_tf=lower_tf,
+                    higher_tf=higher_tf,
+                    risk_reward=float(config["risk_reward"]),
+                    min_signal_score=int(config["min_signal_score"]),
+                    execution_timeframe=timeframe,
+                    higher_timeframe=higher_timeframe,
+                    strategy_version=str(config["strategy_version"]),
+                )
+                if setup is None:
+                    continue
 
-            trigger_time = utc_to_local_naive(datetime.fromisoformat(setup.trigger_candle_time))
-            if open_trade_count(session, timeframe) >= settings.max_open_trades_per_timeframe:
-                continue
-            if latest_duplicate(session, setup.side, trigger_time, timeframe):
-                continue
+                trigger_time = utc_to_local_naive(datetime.fromisoformat(setup.trigger_candle_time))
+                if open_trade_count(session, symbol, timeframe) >= settings.max_open_trades_per_timeframe:
+                    continue
+                if latest_duplicate(session, symbol, setup.side, trigger_time, timeframe):
+                    continue
 
-            signal = TradeSignal(
-                symbol=settings.symbol,
-                timeframe=timeframe,
-                side=setup.side,
-                status="OPEN",
-                bias=setup.bias,
-                strategy_version=setup.strategy_version,
-                signal_time=trigger_time,
-                entry_price=setup.entry_price,
-                stop_loss=setup.stop_loss,
-                take_profit=setup.take_profit,
-                risk_reward=setup.risk_reward,
-                signal_score=setup.signal_score,
-                reason=setup.reason,
-                setup_json=setup.to_json(),
-            )
-            session.add(signal)
-            session.commit()
-            session.refresh(signal)
+                signal = TradeSignal(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    side=setup.side,
+                    status="OPEN",
+                    bias=setup.bias,
+                    strategy_version=setup.strategy_version,
+                    signal_time=trigger_time,
+                    entry_price=setup.entry_price,
+                    stop_loss=setup.stop_loss,
+                    take_profit=setup.take_profit,
+                    risk_reward=setup.risk_reward,
+                    signal_score=setup.signal_score,
+                    reason=setup.reason,
+                    setup_json=setup.to_json(),
+                )
+                session.add(signal)
+                session.commit()
+                session.refresh(signal)
 
-            send_telegram_message(
-                settings.telegram_bot_token,
-                settings.telegram_chat_id,
-                format_signal_message(signal),
-            )
-            signal.telegram_sent = True
-            session.commit()
-            created_signals.append(signal.id)
+                send_telegram_message(
+                    settings.telegram_bot_token,
+                    settings.telegram_chat_id,
+                    format_signal_message(signal),
+                )
+                signal.telegram_sent = True
+                session.commit()
+                created_signals.append(signal.id)
 
     if not created_signals:
         return "No trade setup found."
@@ -239,12 +240,13 @@ def run_trade_evaluation() -> str:
     init_db()
     with SessionLocal() as session:
         open_trades = session.execute(select(TradeSignal).where(TradeSignal.status == "OPEN")).scalars().all()
-        candles_by_timeframe: dict[str, list[Candle]] = {}
+        candles_by_timeframe: dict[tuple[str, str], list[Candle]] = {}
         closed_now = 0
         for trade in open_trades:
-            if trade.timeframe not in candles_by_timeframe:
-                candles_by_timeframe[trade.timeframe] = fetch_klines(settings.symbol, trade.timeframe, limit=500)
-            result = resolve_trade_with_candles(trade, candles_by_timeframe[trade.timeframe])
+            candle_key = (trade.symbol, trade.timeframe)
+            if candle_key not in candles_by_timeframe:
+                candles_by_timeframe[candle_key] = fetch_klines(trade.symbol, trade.timeframe, limit=500)
+            result = resolve_trade_with_candles(trade, candles_by_timeframe[candle_key])
             if result is None:
                 continue
             outcome, close_price, close_time = result

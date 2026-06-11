@@ -7,6 +7,10 @@ import requests
 
 
 BINANCE_API_URL = "https://data-api.binance.vision/api/v3/klines"
+DATA_SYMBOL_ALIASES = {
+    # Binance does not expose spot klines for XAUUSDT; PAXGUSDT is used as the gold-backed proxy.
+    "XAUUSDT": "PAXGUSDT",
+}
 
 
 @dataclass(frozen=True)
@@ -21,9 +25,10 @@ class Candle:
 
 
 def fetch_klines(symbol: str, interval: str, limit: int = 300) -> list[Candle]:
+    data_symbol = DATA_SYMBOL_ALIASES.get(symbol.upper(), symbol.upper())
     response = requests.get(
         BINANCE_API_URL,
-        params={"symbol": symbol, "interval": interval, "limit": limit},
+        params={"symbol": data_symbol, "interval": interval, "limit": limit},
         timeout=30,
     )
     response.raise_for_status()
