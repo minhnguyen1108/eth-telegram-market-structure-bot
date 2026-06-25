@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import create_engine
 from sqlalchemy import text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from src.config import settings
 
@@ -17,7 +18,12 @@ def normalize_database_url(database_url: str) -> str:
     return database_url
 
 
-engine = create_engine(normalize_database_url(settings.database_url), future=True)
+engine = create_engine(
+    normalize_database_url(settings.database_url),
+    future=True,
+    poolclass=NullPool,
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
@@ -25,6 +31,22 @@ def ensure_schema_updates() -> None:
     with engine.begin() as connection:
         dialect = connection.dialect.name
         connection.execute(text("CREATE TABLE IF NOT EXISTS app_metadata (key TEXT PRIMARY KEY, value TEXT)"))
+        schema_key = "schema_updates_v4"
+        schema_updated = connection.execute(
+            text("SELECT value FROM app_metadata WHERE key = :key"),
+            {"key": schema_key},
+        ).scalar_one_or_none()
+        if schema_updated == "done":
+            return
+
+        upsert_metadata = (
+            text("INSERT OR REPLACE INTO app_metadata(key, value) VALUES (:key, 'done')")
+            if dialect == "sqlite"
+            else text(
+                "INSERT INTO app_metadata(key, value) VALUES (:key, 'done') "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            )
+        )
         bitget_columns = {
             "bitget_order_id": "VARCHAR(80)",
             "bitget_client_oid": "VARCHAR(120)",
@@ -90,6 +112,7 @@ def ensure_schema_updates() -> None:
             {"key": migration_key},
         ).scalar_one_or_none()
         if migrated == "done":
+            connection.execute(upsert_metadata, {"key": schema_key})
             return
 
         if dialect == "sqlite":
@@ -108,10 +131,7 @@ def ensure_schema_updates() -> None:
             connection.execute(text("UPDATE strategy_insights SET generated_at = generated_at + INTERVAL '7 hours' WHERE generated_at IS NOT NULL"))
 
         connection.execute(
-            text("INSERT OR REPLACE INTO app_metadata(key, value) VALUES (:key, 'done')") if dialect == "sqlite"
-            else text(
-                "INSERT INTO app_metadata(key, value) VALUES (:key, 'done') "
-                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-            ),
+            upsert_metadata,
             {"key": migration_key},
         )
+        connection.execute(upsert_metadata, {"key": schema_key})
