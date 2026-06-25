@@ -62,29 +62,49 @@ python -m src.main daily-summary
 
 ## Deployment
 
-As of June 3, 2026, the live setup is:
+As of June 25, 2026, the live setup is:
 
 - GitHub Actions for execution
 - External scheduler (`cron-job.org`) for reliable triggering
-- Neon Postgres for storage
+- Firebase Cloud Firestore for storage
 
 Why this setup:
 
 - Some new repositories do not trigger GitHub `schedule` reliably enough for a time-sensitive bot.
 - External schedulers are more predictable for fixed execution times.
 - GitHub Actions still provides a simple and free execution layer for public repositories.
+- Firestore avoids Neon free-plan compute-hour limits for this lightweight scheduled bot.
 - The bot uses Binance public market data through `data-api.binance.vision`, which is more suitable for public market-data access from U.S.-hosted runners.
+
+## Storage Backend
+
+The bot supports two storage backends:
+
+- `DATABASE_BACKEND=firestore`: recommended for the live free setup.
+- `DATABASE_BACKEND=sql`: fallback mode for SQLite/Postgres using `DATABASE_URL`.
+
+Firestore collections used by the bot:
+
+- `trade_signals`
+- `strategy_insights`
+- `daily_summaries`
+- `app_metadata`
+
+Set `FIRESTORE_COLLECTION_PREFIX` only if you want isolated collection names, such as `prod_trade_signals`.
 
 ## Environment Variables
 
 Required secrets:
 
-- `DATABASE_URL`
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_SERVICE_ACCOUNT_JSON`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 
 Optional settings:
 
+- `DATABASE_URL`
+- `FIRESTORE_COLLECTION_PREFIX`
 - `SYMBOL`
 - `TIMEFRAME`
 - `HIGHER_TIMEFRAME`
@@ -99,6 +119,14 @@ Optional settings:
 - `WINRATE_ALERT_THRESHOLD`
 - `TIMEZONE`
 - `SEND_SCAN_STATUS_WHEN_NO_SIGNAL`
+
+## Firebase Setup
+
+1. Create a Firebase project and enable Cloud Firestore in Native mode.
+2. Create a service account key from Google Cloud IAM or Firebase project settings.
+3. Save the full JSON key as the GitHub secret `FIREBASE_SERVICE_ACCOUNT_JSON`.
+4. Save the Firebase project ID as the GitHub secret `FIREBASE_PROJECT_ID`.
+5. Keep the workflow env value `DATABASE_BACKEND=firestore`.
 
 ## Scheduler Notes
 
