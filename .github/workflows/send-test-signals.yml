@@ -1,0 +1,61 @@
+name: Send Telegram Test Signals
+
+on:
+  workflow_dispatch:
+
+jobs:
+  send-test-signals:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send test signal messages
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+          messages = [
+              "[TEST] [ETHUSDT] T\u00edn hi\u1ec7u MUA\n"
+              "Xu h\u01b0\u1edbng ch\u00ednh: T\u0103ng\n"
+              "Khung v\u00e0o l\u1ec7nh: 15m\n"
+              "Lo\u1ea1i setup: intraday\n"
+              "\u0110i\u1ec3m v\u00e0o l\u1ec7nh: 3333.33\n"
+              "SL: 3299.00\n"
+              "TP: 3402.00\n"
+              "RR: 2.00\n"
+              "\u0110i\u1ec3m ch\u1ea5t l\u01b0\u1ee3ng: 5\n"
+              "L\u00fd do: Tin test ki\u1ec3m tra lu\u1ed3ng t\u00edn hi\u1ec7u intraday, "
+              "kh\u00f4ng ph\u1ea3i t\u00edn hi\u1ec7u giao d\u1ecbch th\u1eadt.\n"
+              "Bitget: DISABLED",
+              "[TEST] [XAUUSDT] T\u00edn hi\u1ec7u B\u00c1N\n"
+              "Xu h\u01b0\u1edbng ch\u00ednh: Gi\u1ea3m\n"
+              "Khung v\u00e0o l\u1ec7nh: 4h\n"
+              "Lo\u1ea1i setup: swing\n"
+              "\u0110i\u1ec3m v\u00e0o l\u1ec7nh: 2320.50\n"
+              "SL: 2348.00\n"
+              "TP: 2238.00\n"
+              "RR: 3.00\n"
+              "\u0110i\u1ec3m ch\u1ea5t l\u01b0\u1ee3ng: 5\n"
+              "L\u00fd do: Tin test ki\u1ec3m tra lu\u1ed3ng t\u00edn hi\u1ec7u swing, "
+              "kh\u00f4ng ph\u1ea3i t\u00edn hi\u1ec7u giao d\u1ecbch th\u1eadt.\n"
+              "Bitget: DISABLED",
+          ]
+
+          for message in messages:
+              payload = json.dumps({"chat_id": chat_id, "text": message}).encode("utf-8")
+              request = urllib.request.Request(
+                  f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                  data=payload,
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  response.read()
+
+          print(f"Sent {len(messages)} Telegram test signal messages.")
+          PY
