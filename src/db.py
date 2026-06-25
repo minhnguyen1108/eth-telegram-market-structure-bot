@@ -25,6 +25,12 @@ def ensure_schema_updates() -> None:
     with engine.begin() as connection:
         dialect = connection.dialect.name
         connection.execute(text("CREATE TABLE IF NOT EXISTS app_metadata (key TEXT PRIMARY KEY, value TEXT)"))
+        bitget_columns = {
+            "bitget_order_id": "VARCHAR(80)",
+            "bitget_client_oid": "VARCHAR(120)",
+            "bitget_order_status": "VARCHAR(30)",
+            "bitget_error": "TEXT",
+        }
         if dialect == "sqlite":
             columns = {row[1] for row in connection.execute(text("PRAGMA table_info(strategy_insights)"))}
             if "trade_signal_id" not in columns:
@@ -33,9 +39,15 @@ def ensure_schema_updates() -> None:
                 except Exception:
                     pass
             connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_strategy_insights_trade_signal_id ON strategy_insights(trade_signal_id)"))
+            trade_columns = {row[1] for row in connection.execute(text("PRAGMA table_info(trade_signals)"))}
+            for column_name, column_type in bitget_columns.items():
+                if column_name not in trade_columns:
+                    connection.execute(text(f"ALTER TABLE trade_signals ADD COLUMN {column_name} {column_type}"))
         elif dialect == "postgresql":
             connection.execute(text("ALTER TABLE strategy_insights ADD COLUMN IF NOT EXISTS trade_signal_id INTEGER"))
             connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_strategy_insights_trade_signal_id ON strategy_insights(trade_signal_id)"))
+            for column_name, column_type in bitget_columns.items():
+                connection.execute(text(f"ALTER TABLE trade_signals ADD COLUMN IF NOT EXISTS {column_name} {column_type}"))
 
         legacy_strategy_key = "legacy_strategy_versions_normalized_v2"
         legacy_strategy_migrated = connection.execute(

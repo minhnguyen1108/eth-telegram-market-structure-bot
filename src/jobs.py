@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import desc, select
 
+from src.bitget_client import BitgetClient
 from src.binance_client import Candle, fetch_klines
 from src.config import settings
 from src.db import Base, SessionLocal, engine, ensure_schema_updates
@@ -58,7 +59,7 @@ def format_signal_message(signal: TradeSignal) -> str:
     side_label = {"LONG": "MUA", "SHORT": "BÁN"}.get(signal.side, signal.side)
     bias_label = {"bullish": "Tăng", "bearish": "Giảm", "neutral": "Trung lập"}.get(signal.bias, signal.bias)
     strategy_version = normalize_strategy_version(signal.strategy_version)
-    return (
+    message = (
         f"[{signal.symbol}] Tín hiệu {side_label}\n"
         f"Xu hướng chính: {bias_label}\n"
         f"Khung vào lệnh: {signal.timeframe}\n"
@@ -70,6 +71,58 @@ def format_signal_message(signal: TradeSignal) -> str:
         f"Điểm chất lượng: {signal.signal_score}\n"
         f"Lý do: {signal.reason}"
     )
+    if signal.bitget_order_status:
+        message += f"\nBitget: {signal.bitget_order_status}"
+        if signal.bitget_order_id:
+            message += f" | Order ID: {signal.bitget_order_id}"
+        if signal.bitget_error:
+            message += f" | Lỗi: {signal.bitget_error[:180]}"
+    return message
+
+
+def execute_bitget_order(signal: TradeSignal) -> None:
+    if not settings.bitget_trading_enabled:
+        signal.bitget_order_status = "DISABLED"
+        return
+
+    if not settings.bitget_api_key or not settings.bitget_api_secret or not settings.bitget_api_passphrase:
+        signal.bitget_order_status = "SKIPPED"
+        signal.bitget_error = "Thiếu BITGET_API_KEY, BITGET_API_SECRET hoặc BITGET_API_PASSPHRASE."
+        return
+
+    order_size = settings.bitget_order_size(signal.symbol)
+    if not order_size:
+        signal.bitget_order_status = "SKIPPED"
+        signal.bitget_error = f"Thiếu BITGET_ORDER_SIZE_{signal.symbol} hoặc BITGET_DEFAULT_ORDER_SIZE."
+        return
+
+    client = BitgetClient(
+        api_key=settings.bitget_api_key,
+        api_secret=settings.bitget_api_secret,
+        passphrase=settings.bitget_api_passphrase,
+        base_url=settings.bitget_base_url,
+    )
+    try:
+        result = client.place_market_order(
+            symbol=settings.bitget_symbol(signal.symbol),
+            side=signal.side,
+            size=order_size,
+            product_type=settings.bitget_product_type,
+            margin_mode=settings.bitget_margin_mode,
+            margin_coin=settings.bitget_margin_coin,
+            take_profit=signal.take_profit,
+            stop_loss=signal.stop_loss,
+            client_oid_prefix=f"trade-{signal.id}",
+        )
+    except Exception as exc:
+        signal.bitget_order_status = "FAILED"
+        signal.bitget_error = str(exc)
+        return
+
+    signal.bitget_order_id = result.order_id
+    signal.bitget_client_oid = result.client_oid
+    signal.bitget_order_status = "PLACED"
+    signal.bitget_error = None
 
 
 def signal_scan_configs() -> list[dict[str, str | float | int]]:
@@ -150,6 +203,9 @@ def run_signal_scan() -> str:
                 session.add(signal)
                 session.commit()
                 session.refresh(signal)
+
+                execute_bitget_order(signal)
+                session.commit()
 
                 send_telegram_message(
                     settings.telegram_bot_token,

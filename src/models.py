@@ -32,6 +32,10 @@ class TradeSignal(Base):
     outcome: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     pnl_r: Mapped[float | None] = mapped_column(Float, nullable=True)
     telegram_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    bitget_order_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    bitget_client_oid: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    bitget_order_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    bitget_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now_naive)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now_naive, onupdate=local_now_naive)
 
