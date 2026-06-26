@@ -32,7 +32,7 @@ jobs:
           BITGET_MARGIN_MODE: ${{ vars.BITGET_MARGIN_MODE || 'isolated' }}
           BITGET_MARGIN_COIN: ${{ vars.BITGET_MARGIN_COIN || 'USDT' }}
           BITGET_SYMBOL_MAP: ${{ vars.BITGET_SYMBOL_MAP || 'XAUUSDT:XAUUSDT' }}
-          SYMBOLS: ETHUSDT,XAUUSDT
+          SYMBOLS: ETHUSDT
           TIMEFRAME: 15m
           HIGHER_TIMEFRAME: 4h
           RISK_REWARD: "2.0"
