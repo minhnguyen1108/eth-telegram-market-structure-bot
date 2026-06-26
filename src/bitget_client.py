@@ -54,8 +54,14 @@ class BitgetClient:
             data=body.encode("utf-8"),
             timeout=30,
         )
-        response.raise_for_status()
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+        if response.status_code >= 400:
+            code = data.get("code", response.status_code)
+            message = data.get("msg") or response.text
+            raise RuntimeError(f"Bitget HTTP {response.status_code} error {code}: {message}")
         if data.get("code") != "00000":
             raise RuntimeError(f"Bitget API error {data.get('code')}: {data.get('msg')}")
         return data
