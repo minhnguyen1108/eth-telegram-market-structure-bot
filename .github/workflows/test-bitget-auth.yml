@@ -1,0 +1,76 @@
+name: Test Bitget Auth
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-bitget-auth:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Bitget account API access
+        env:
+          BITGET_API_KEY: ${{ secrets.BITGET_API_KEY }}
+          BITGET_API_SECRET: ${{ secrets.BITGET_API_SECRET }}
+          BITGET_API_PASSPHRASE: ${{ secrets.BITGET_API_PASSPHRASE }}
+          BITGET_PRODUCT_TYPE: ${{ vars.BITGET_PRODUCT_TYPE || 'USDT-FUTURES' }}
+        run: |
+          python - <<'PY'
+          import base64
+          import hashlib
+          import hmac
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          api_key = os.environ["BITGET_API_KEY"]
+          api_secret = os.environ["BITGET_API_SECRET"]
+          passphrase = os.environ["BITGET_API_PASSPHRASE"]
+          product_type = os.environ.get("BITGET_PRODUCT_TYPE", "USDT-FUTURES")
+
+          request_path = f"/api/v2/mix/account/accounts?productType={product_type}"
+          timestamp = str(int(time.time() * 1000))
+          signature_payload = f"{timestamp}GET{request_path}"
+          signature = base64.b64encode(
+              hmac.new(
+                  api_secret.encode("utf-8"),
+                  signature_payload.encode("utf-8"),
+                  hashlib.sha256,
+              ).digest()
+          ).decode("utf-8")
+
+          request = urllib.request.Request(
+              f"https://api.bitget.com{request_path}",
+              headers={
+                  "ACCESS-KEY": api_key,
+                  "ACCESS-SIGN": signature,
+                  "ACCESS-TIMESTAMP": timestamp,
+                  "ACCESS-PASSPHRASE": passphrase,
+                  "Content-Type": "application/json",
+                  "locale": "en-US",
+              },
+              method="GET",
+          )
+
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  payload = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              body = exc.read().decode("utf-8", errors="replace")
+              raise SystemExit(f"Bitget HTTP {exc.code}: {body}") from exc
+
+          if payload.get("code") != "00000":
+              raise SystemExit(f"Bitget API error {payload.get('code')}: {payload.get('msg')}")
+
+          accounts = payload.get("data") or []
+          print(f"Bitget auth OK. Account rows: {len(accounts)}.")
+          for account in accounts:
+              print(
+                  "marginCoin={marginCoin}; available={available}; equity={equity}".format(
+                      marginCoin=account.get("marginCoin"),
+                      available=account.get("available"),
+                      equity=account.get("accountEquity") or account.get("usdtEquity"),
+                  )
+              )
+          PY
