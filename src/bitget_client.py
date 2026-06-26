@@ -66,6 +66,15 @@ class BitgetClient:
             raise RuntimeError(f"Bitget API error {data.get('code')}: {data.get('msg')}")
         return data
 
+    def set_leverage(self, *, symbol: str, product_type: str, margin_coin: str, leverage: str) -> dict:
+        payload = {
+            "symbol": symbol,
+            "productType": product_type,
+            "marginCoin": margin_coin,
+            "leverage": leverage,
+        }
+        return self._post("/api/v2/mix/account/set-leverage", payload)
+
     def place_market_order(
         self,
         *,

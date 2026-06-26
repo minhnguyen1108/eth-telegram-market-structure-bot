@@ -76,8 +76,17 @@ def execute_bitget_order(signal: TradeSignal) -> None:
         base_url=settings.bitget_base_url,
     )
     try:
+        bitget_symbol = settings.bitget_symbol(signal.symbol)
+        leverage = settings.bitget_leverage(signal.symbol)
+        if leverage:
+            client.set_leverage(
+                symbol=bitget_symbol,
+                product_type=settings.bitget_product_type,
+                margin_coin=settings.bitget_margin_coin,
+                leverage=leverage,
+            )
         result = client.place_market_order(
-            symbol=settings.bitget_symbol(signal.symbol),
+            symbol=bitget_symbol,
             side=signal.side,
             size=order_size,
             product_type=settings.bitget_product_type,

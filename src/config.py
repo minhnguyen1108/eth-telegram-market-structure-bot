@@ -29,6 +29,7 @@ class Settings:
     bitget_margin_mode: str = os.getenv("BITGET_MARGIN_MODE", "isolated")
     bitget_margin_coin: str = os.getenv("BITGET_MARGIN_COIN", "USDT")
     bitget_default_order_size: str = os.getenv("BITGET_DEFAULT_ORDER_SIZE", "")
+    bitget_default_leverage: str = os.getenv("BITGET_DEFAULT_LEVERAGE", "")
     bitget_symbol_map_csv: str = os.getenv("BITGET_SYMBOL_MAP", "XAUUSDT:XAUUSDT")
     timeframe: str = os.getenv("TIMEFRAME", "15m")
     higher_timeframe: str = os.getenv("HIGHER_TIMEFRAME", "4h")
@@ -65,6 +66,10 @@ class Settings:
     def bitget_order_size(self, symbol: str) -> str:
         symbol_size = os.getenv(f"BITGET_ORDER_SIZE_{symbol.upper()}", "")
         return symbol_size or self.bitget_default_order_size
+
+    def bitget_leverage(self, symbol: str) -> str:
+        symbol_leverage = os.getenv(f"BITGET_LEVERAGE_{symbol.upper()}", "")
+        return symbol_leverage or self.bitget_default_leverage
 
 
 settings = Settings()

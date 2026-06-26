@@ -27,6 +27,28 @@ class FakeResponse:
 
 
 class BitgetClientTest(unittest.TestCase):
+    def test_set_leverage_posts_expected_payload(self) -> None:
+        client = BitgetClient(api_key="key", api_secret="secret", passphrase="pass")
+
+        with patch(
+            "src.bitget_client.requests.post",
+            return_value=FakeResponse(200, {"code": "00000", "data": {"leverage": "4"}}),
+        ) as post:
+            result = client.set_leverage(
+                symbol="ETHUSDT",
+                product_type="USDT-FUTURES",
+                margin_coin="USDT",
+                leverage="4",
+            )
+
+        self.assertEqual(result["data"]["leverage"], "4")
+        self.assertTrue(post.called)
+        self.assertEqual(post.call_args.args[0], "https://api.bitget.com/api/v2/mix/account/set-leverage")
+        self.assertEqual(
+            post.call_args.kwargs["data"].decode("utf-8"),
+            '{"symbol":"ETHUSDT","productType":"USDT-FUTURES","marginCoin":"USDT","leverage":"4"}',
+        )
+
     def test_http_error_includes_bitget_response_body(self) -> None:
         client = BitgetClient(api_key="key", api_secret="secret", passphrase="pass")
 
