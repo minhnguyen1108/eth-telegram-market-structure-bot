@@ -8,7 +8,7 @@ from sqlalchemy import desc, select
 
 from src.config import settings
 from src.db import Base, SessionLocal, engine, ensure_schema_updates
-from src.models import DailySummary, StrategyInsight, TradeSignal
+from src.models import AiTradeReview, DailySummary, StrategyInsight, TradeSignal
 from src.time_utils import local_now_naive
 
 
@@ -22,6 +22,7 @@ class TradeStorage(Protocol):
     def list_closed_trades(self) -> list[TradeSignal]: ...
     def list_closed_trades_between(self, start_local: datetime, end_local: datetime) -> list[TradeSignal]: ...
     def upsert_strategy_insight(self, insight: StrategyInsight) -> StrategyInsight: ...
+    def upsert_ai_trade_review(self, review: AiTradeReview) -> AiTradeReview: ...
     def upsert_daily_summary(self, summary: DailySummary) -> DailySummary: ...
 
 
@@ -127,6 +128,44 @@ def strategy_insight_from_document(document: dict[str, Any]) -> StrategyInsight:
         winrate=float(document["winrate"]),
         total_trades=int(document["total_trades"]),
         recommendation=document["recommendation"],
+    )
+
+
+def ai_trade_review_to_document(review: AiTradeReview) -> dict[str, Any]:
+    return {
+        "id": review.id,
+        "trade_signal_id": review.trade_signal_id,
+        "generated_at": review.generated_at or local_now_naive(),
+        "symbol": review.symbol,
+        "timeframe": review.timeframe,
+        "strategy_version": review.strategy_version,
+        "outcome": review.outcome,
+        "summary_vi": review.summary_vi,
+        "failure_pattern": review.failure_pattern,
+        "recommended_action": review.recommended_action,
+        "suggested_rule_change": review.suggested_rule_change,
+        "confidence": review.confidence,
+        "risk_note": review.risk_note,
+        "raw_response": review.raw_response,
+    }
+
+
+def ai_trade_review_from_document(document: dict[str, Any]) -> AiTradeReview:
+    return AiTradeReview(
+        id=document.get("id"),
+        trade_signal_id=int(document["trade_signal_id"]),
+        generated_at=normalize_datetime(document.get("generated_at")) or local_now_naive(),
+        symbol=document["symbol"],
+        timeframe=document["timeframe"],
+        strategy_version=document["strategy_version"],
+        outcome=document["outcome"],
+        summary_vi=document["summary_vi"],
+        failure_pattern=document["failure_pattern"],
+        recommended_action=document["recommended_action"],
+        suggested_rule_change=document["suggested_rule_change"],
+        confidence=document["confidence"],
+        risk_note=document["risk_note"],
+        raw_response=document.get("raw_response", ""),
     )
 
 
@@ -245,6 +284,33 @@ class SqlStorage:
                 existing.winrate = insight.winrate
                 existing.total_trades = insight.total_trades
                 existing.recommendation = insight.recommendation
+                target = existing
+            session.commit()
+            session.refresh(target)
+            session.expunge(target)
+            return target
+
+    def upsert_ai_trade_review(self, review: AiTradeReview) -> AiTradeReview:
+        with SessionLocal() as session:
+            existing = session.execute(
+                select(AiTradeReview).where(AiTradeReview.trade_signal_id == review.trade_signal_id)
+            ).scalar_one_or_none()
+            if existing is None:
+                session.add(review)
+                target = review
+            else:
+                existing.generated_at = review.generated_at
+                existing.symbol = review.symbol
+                existing.timeframe = review.timeframe
+                existing.strategy_version = review.strategy_version
+                existing.outcome = review.outcome
+                existing.summary_vi = review.summary_vi
+                existing.failure_pattern = review.failure_pattern
+                existing.recommended_action = review.recommended_action
+                existing.suggested_rule_change = review.suggested_rule_change
+                existing.confidence = review.confidence
+                existing.risk_note = review.risk_note
+                existing.raw_response = review.raw_response
                 target = existing
             session.commit()
             session.refresh(target)
@@ -377,6 +443,15 @@ class FirestoreStorage:
             merge=True,
         )
         return insight
+
+    def upsert_ai_trade_review(self, review: AiTradeReview) -> AiTradeReview:
+        if review.id is None:
+            review.id = review.trade_signal_id
+        self.collection("ai_trade_reviews").document(str(review.trade_signal_id)).set(
+            ai_trade_review_to_document(review),
+            merge=True,
+        )
+        return review
 
     def upsert_daily_summary(self, summary: DailySummary) -> DailySummary:
         if summary.id is None:

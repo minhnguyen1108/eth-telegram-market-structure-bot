@@ -4,10 +4,11 @@ from collections import Counter
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from src.ai_trade_analyzer import analyze_trade_with_ai, format_ai_trade_review_message
 from src.bitget_client import BitgetClient
 from src.binance_client import Candle, fetch_klines
 from src.config import settings
-from src.models import DailySummary, StrategyInsight, TradeSignal
+from src.models import AiTradeReview, DailySummary, StrategyInsight, TradeSignal
 from src.strategy import build_signal
 from src.storage import get_storage
 from src.telegram_client import send_telegram_message
@@ -261,6 +262,54 @@ def build_recommendation(closed_trades: list[TradeSignal], winrate: float) -> st
     return " ".join(recommendations)
 
 
+def recent_eth_closed_history(trade: TradeSignal, all_closed_trades: list[TradeSignal]) -> list[TradeSignal]:
+    if trade.symbol.upper() != "ETHUSDT":
+        return []
+
+    by_id = {
+        candidate.id: candidate
+        for candidate in all_closed_trades
+        if candidate.id is not None and candidate.symbol.upper() == "ETHUSDT" and candidate.status == "CLOSED"
+    }
+    if trade.id is not None:
+        by_id[trade.id] = trade
+
+    return sorted(
+        by_id.values(),
+        key=lambda item: item.close_time or datetime.min,
+        reverse=True,
+    )[: settings.ai_analysis_lookback]
+
+
+def maybe_send_ai_trade_reviews(
+    storage,
+    recently_closed: list[TradeSignal],
+    all_closed_trades: list[TradeSignal],
+    analyzer=analyze_trade_with_ai,
+    sender=send_telegram_message,
+) -> list[AiTradeReview]:
+    if not settings.ai_trade_analysis_enabled or not settings.openai_api_key:
+        return []
+
+    reviews: list[AiTradeReview] = []
+    for trade in recently_closed:
+        history = recent_eth_closed_history(trade, all_closed_trades)
+        if len(history) < settings.ai_min_closed_trades:
+            continue
+        try:
+            review = analyzer(trade, history)
+            review = storage.upsert_ai_trade_review(review)
+            sender(
+                settings.telegram_bot_token,
+                settings.telegram_chat_id,
+                format_ai_trade_review_message(review, trade),
+            )
+            reviews.append(review)
+        except Exception:
+            continue
+    return reviews
+
+
 def format_closed_trade_detail(trade: TradeSignal) -> str:
     strategy_version = normalize_strategy_version(trade.strategy_version)
     side_label = {"LONG": "MUA", "SHORT": "BÁN"}.get(trade.side, trade.side)
@@ -509,6 +558,10 @@ def run_trade_evaluation() -> str:
             + "\n".join(summary_lines)
         ),
     )
+    try:
+        maybe_send_ai_trade_reviews(storage, recently_closed, all_closed_trades)
+    except Exception:
+        pass
     compact = ", ".join(
         f"{strategy_version}={winrate:.2f}%/{total_trades}"
         for strategy_version, (winrate, total_trades, _) in sorted(strategy_summaries.items())

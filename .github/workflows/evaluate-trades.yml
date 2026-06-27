@@ -21,6 +21,11 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_TEXT_MODEL: ${{ vars.OPENAI_TEXT_MODEL || 'gpt-4.1-mini' }}
+          AI_TRADE_ANALYSIS_ENABLED: ${{ vars.AI_TRADE_ANALYSIS_ENABLED || 'false' }}
+          AI_MIN_CLOSED_TRADES: ${{ vars.AI_MIN_CLOSED_TRADES || '8' }}
+          AI_ANALYSIS_LOOKBACK: ${{ vars.AI_ANALYSIS_LOOKBACK || '30' }}
           SYMBOLS: ETHUSDT,XAUUSDT
           TIMEFRAME: 15m
           HIGHER_TIMEFRAME: 4h

@@ -18,6 +18,11 @@ class Settings:
     firestore_collection_prefix: str = os.getenv("FIRESTORE_COLLECTION_PREFIX", "")
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    openai_text_model: str = os.getenv("OPENAI_TEXT_MODEL", "gpt-4.1-mini")
+    ai_trade_analysis_enabled: bool = os.getenv("AI_TRADE_ANALYSIS_ENABLED", "false").lower() == "true"
+    ai_min_closed_trades: int = int(os.getenv("AI_MIN_CLOSED_TRADES", "8"))
+    ai_analysis_lookback: int = int(os.getenv("AI_ANALYSIS_LOOKBACK", "30"))
     symbol: str = os.getenv("SYMBOL", "ETHUSDT")
     symbols_csv: str = os.getenv("SYMBOLS", os.getenv("SYMBOL", "ETHUSDT"))
     bitget_api_key: str = os.getenv("BITGET_API_KEY", "")

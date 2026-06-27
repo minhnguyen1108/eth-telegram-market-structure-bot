@@ -64,3 +64,22 @@ class StrategyInsight(Base):
     winrate: Mapped[float] = mapped_column(Float)
     total_trades: Mapped[int] = mapped_column(Integer)
     recommendation: Mapped[str] = mapped_column(Text)
+
+
+class AiTradeReview(Base):
+    __tablename__ = "ai_trade_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trade_signal_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=local_now_naive, index=True)
+    symbol: Mapped[str] = mapped_column(String(20), index=True)
+    timeframe: Mapped[str] = mapped_column(String(10), index=True)
+    strategy_version: Mapped[str] = mapped_column(String(20), index=True)
+    outcome: Mapped[str] = mapped_column(String(20), index=True)
+    summary_vi: Mapped[str] = mapped_column(Text)
+    failure_pattern: Mapped[str] = mapped_column(Text)
+    recommended_action: Mapped[str] = mapped_column(String(30), index=True)
+    suggested_rule_change: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[str] = mapped_column(String(20))
+    risk_note: Mapped[str] = mapped_column(Text)
+    raw_response: Mapped[str] = mapped_column(Text)
