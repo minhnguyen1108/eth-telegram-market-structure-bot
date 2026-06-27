@@ -1,0 +1,62 @@
+name: Send AI Trade Review Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  send-ai-review-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Analyze latest closed ETH trade and send Telegram
+        env:
+          DATABASE_BACKEND: firestore
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_TEXT_MODEL: ${{ vars.OPENAI_TEXT_MODEL || 'gpt-4.1-mini' }}
+          AI_ANALYSIS_LOOKBACK: ${{ vars.AI_ANALYSIS_LOOKBACK || '30' }}
+          TIMEZONE: Asia/Bangkok
+        run: |
+          python - <<'PY'
+          from src.ai_trade_analyzer import analyze_trade_with_ai, format_ai_trade_review_message
+          from src.storage import get_storage
+          from src.telegram_client import send_telegram_message
+          from src.config import settings
+
+          storage = get_storage()
+          storage.init()
+          closed_trades = storage.list_closed_trades()
+          eth_closed = sorted(
+              [
+                  trade
+                  for trade in closed_trades
+                  if trade.symbol.upper() == "ETHUSDT" and trade.status == "CLOSED"
+              ],
+              key=lambda trade: trade.close_time,
+              reverse=True,
+          )
+          if not eth_closed:
+              raise SystemExit("No closed ETHUSDT trades found.")
+
+          trade = eth_closed[0]
+          history = eth_closed[: settings.ai_analysis_lookback]
+          review = analyze_trade_with_ai(trade, history)
+          review = storage.upsert_ai_trade_review(review)
+          send_telegram_message(
+              settings.telegram_bot_token,
+              settings.telegram_chat_id,
+              "[TEST] " + format_ai_trade_review_message(review, trade),
+          )
+          print(
+              f"Sent AI review for trade #{trade.id}: "
+              f"outcome={trade.outcome}, action={review.recommended_action}, confidence={review.confidence}"
+          )
+          PY
