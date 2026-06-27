@@ -1,0 +1,195 @@
+name: Analyze Trades
+
+on:
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Analyze closed trades
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          FIRESTORE_COLLECTION_PREFIX: ${{ vars.FIRESTORE_COLLECTION_PREFIX }}
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from collections import Counter, defaultdict
+          from datetime import datetime
+
+          from sqlalchemy import create_engine, text
+          from sqlalchemy.pool import NullPool
+
+          from src.db import normalize_database_url
+          from src.storage import normalize_datetime
+
+
+          def normalize_strategy(value: str | None) -> str:
+              if value in {None, "", "v1", "v1_intraday"}:
+                  return "intraday"
+              if value == "v1_swing":
+                  return "swing"
+              return value
+
+
+          def setup_field(row: dict, key: str, default=None):
+              try:
+                  setup = json.loads(row.get("setup_json") or "{}")
+              except json.JSONDecodeError:
+                  setup = {}
+              return setup.get(key, default)
+
+
+          def load_firestore() -> list[dict]:
+              service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+              if not service_account_json:
+                  print("FIRESTORE_SKIPPED: missing FIREBASE_SERVICE_ACCOUNT_JSON")
+                  return []
+
+              from google.cloud import firestore
+              from google.oauth2 import service_account
+
+              info = json.loads(service_account_json)
+              project_id = os.getenv("FIREBASE_PROJECT_ID") or info.get("project_id")
+              credentials = service_account.Credentials.from_service_account_info(info)
+              client = firestore.Client(project=project_id, credentials=credentials)
+              prefix = os.getenv("FIRESTORE_COLLECTION_PREFIX", "").strip()
+              collection_name = f"{prefix}_trade_signals" if prefix else "trade_signals"
+              rows = []
+              for snapshot in client.collection(collection_name).where("status", "==", "CLOSED").stream():
+                  data = snapshot.to_dict() or {}
+                  rows.append({**data, "backend": "firestore"})
+              return rows
+
+
+          def load_neon() -> list[dict]:
+              database_url = os.getenv("DATABASE_URL", "")
+              if not database_url:
+                  print("NEON_SKIPPED: missing DATABASE_URL")
+                  return []
+              engine = create_engine(
+                  normalize_database_url(database_url),
+                  future=True,
+                  poolclass=NullPool,
+                  pool_pre_ping=True,
+              )
+              query = text(
+                  """
+                  SELECT id, symbol, timeframe, strategy_version, side, status, outcome,
+                         signal_time, close_time, entry_price, stop_loss, take_profit,
+                         risk_reward, signal_score, pnl_r, setup_json, bitget_order_status
+                  FROM trade_signals
+                  WHERE status = 'CLOSED'
+                  ORDER BY close_time DESC NULLS LAST
+                  """
+              )
+              with engine.connect() as connection:
+                  return [{**dict(row._mapping), "backend": "neon"} for row in connection.execute(query)]
+
+
+          def summarize(name: str, rows: list[dict]) -> None:
+              print(f"=== {name} SUMMARY ===")
+              print(f"closed_trades={len(rows)}")
+              if not rows:
+                  return
+
+              wins = sum(1 for row in rows if row.get("outcome") == "WIN")
+              losses = sum(1 for row in rows if row.get("outcome") == "LOSS")
+              total_r = sum(float(row.get("pnl_r") or 0) for row in rows)
+              winrate = (wins / len(rows)) * 100 if rows else 0
+              print(f"wins={wins}; losses={losses}; winrate={winrate:.2f}; total_r={total_r:.2f}")
+
+              groups: dict[tuple, list[dict]] = defaultdict(list)
+              for row in rows:
+                  key = (
+                      row.get("symbol"),
+                      row.get("timeframe"),
+                      normalize_strategy(row.get("strategy_version")),
+                      row.get("side"),
+                      row.get("signal_score"),
+                  )
+                  groups[key].append(row)
+
+              print("GROUPS symbol,timeframe,strategy,side,score,total,wins,losses,winrate,total_r")
+              for key, trades in sorted(groups.items()):
+                  group_wins = sum(1 for row in trades if row.get("outcome") == "WIN")
+                  group_losses = sum(1 for row in trades if row.get("outcome") == "LOSS")
+                  group_r = sum(float(row.get("pnl_r") or 0) for row in trades)
+                  group_winrate = (group_wins / len(trades)) * 100 if trades else 0
+                  print(f"{key},{len(trades)},{group_wins},{group_losses},{group_winrate:.2f},{group_r:.2f}")
+
+              by_hour = Counter()
+              by_hour_loss = Counter()
+              by_weekday = Counter()
+              by_weekday_loss = Counter()
+              for row in rows:
+                  signal_time = normalize_datetime(row.get("signal_time"))
+                  if signal_time:
+                      by_hour[signal_time.hour] += 1
+                      by_weekday[signal_time.strftime("%a")] += 1
+                      if row.get("outcome") == "LOSS":
+                          by_hour_loss[signal_time.hour] += 1
+                          by_weekday_loss[signal_time.strftime("%a")] += 1
+              print("HOUR_LOSS_RATES hour,total,losses,loss_rate")
+              for hour in sorted(by_hour):
+                  print(f"{hour},{by_hour[hour]},{by_hour_loss[hour]},{(by_hour_loss[hour]/by_hour[hour])*100:.2f}")
+              print("WEEKDAY_LOSS_RATES weekday,total,losses,loss_rate")
+              for weekday in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]:
+                  if by_weekday[weekday]:
+                      print(f"{weekday},{by_weekday[weekday]},{by_weekday_loss[weekday]},{(by_weekday_loss[weekday]/by_weekday[weekday])*100:.2f}")
+
+              print("RECENT_LOSSES id,symbol,timeframe,strategy,side,score,rr,entry,sl,tp,structure_low,structure_high,zone_low,zone_high,signal_time,close_time,bitget")
+              losses_sorted = sorted(
+                  [row for row in rows if row.get("outcome") == "LOSS"],
+                  key=lambda row: normalize_datetime(row.get("close_time")) or datetime.min,
+                  reverse=True,
+              )
+              for row in losses_sorted[:25]:
+                  print(
+                      ",".join(
+                          str(value)
+                          for value in [
+                              row.get("id"),
+                              row.get("symbol"),
+                              row.get("timeframe"),
+                              normalize_strategy(row.get("strategy_version")),
+                              row.get("side"),
+                              row.get("signal_score"),
+                              row.get("risk_reward"),
+                              row.get("entry_price"),
+                              row.get("stop_loss"),
+                              row.get("take_profit"),
+                              setup_field(row, "structure_low"),
+                              setup_field(row, "structure_high"),
+                              setup_field(row, "zone_low"),
+                              setup_field(row, "zone_high"),
+                              normalize_datetime(row.get("signal_time")),
+                              normalize_datetime(row.get("close_time")),
+                              row.get("bitget_order_status"),
+                          ]
+                      )
+                  )
+
+
+          firestore_rows = load_firestore()
+          neon_rows = load_neon()
+          summarize("FIRESTORE", firestore_rows)
+          summarize("NEON", neon_rows)
+
+          deduped = {}
+          for row in neon_rows + firestore_rows:
+              key = (row.get("symbol"), row.get("timeframe"), row.get("side"), str(normalize_datetime(row.get("signal_time"))))
+              deduped[key] = row
+          summarize("COMBINED_DEDUPED", list(deduped.values()))
+          PY
