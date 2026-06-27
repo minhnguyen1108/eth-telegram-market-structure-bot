@@ -203,6 +203,24 @@ jobs:
                   and (normalize_datetime(row.get("signal_time")) or datetime.min).weekday() < 5
                   and (zone_metrics(row)["risk_percent"] is not None and zone_metrics(row)["risk_percent"] <= 0.012),
               )
+              summarize_filter(
+                  "ETH_intraday_deep_half_weekday_low_risk",
+                  rows,
+                  lambda row: row.get("symbol") == "ETHUSDT"
+                  and row.get("timeframe") == "15m"
+                  and normalize_strategy(row.get("strategy_version")) == "intraday"
+                  and zone_metrics(row)["deep_half"]
+                  and (normalize_datetime(row.get("signal_time")) or datetime.min).weekday() < 5
+                  and (zone_metrics(row)["risk_percent"] is not None and zone_metrics(row)["risk_percent"] <= 0.012),
+              )
+              summarize_filter(
+                  "ETH_all_timeframes_deep_half_weekday_low_risk",
+                  rows,
+                  lambda row: row.get("symbol") == "ETHUSDT"
+                  and zone_metrics(row)["deep_half"]
+                  and (normalize_datetime(row.get("signal_time")) or datetime.min).weekday() < 5
+                  and (zone_metrics(row)["risk_percent"] is not None and zone_metrics(row)["risk_percent"] <= 0.012),
+              )
 
               print("RECENT_LOSSES id,symbol,timeframe,strategy,side,score,rr,entry,sl,tp,structure_low,structure_high,zone_low,zone_high,signal_time,close_time,bitget")
               losses_sorted = sorted(
