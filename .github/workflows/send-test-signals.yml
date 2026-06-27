@@ -2,6 +2,11 @@ name: Send Telegram Test Signals
 
 on:
   workflow_dispatch:
+    inputs:
+      message:
+        description: Optional custom Telegram message to send.
+        required: false
+        type: string
 
 jobs:
   send-test-signals:
@@ -11,6 +16,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CUSTOM_MESSAGE: ${{ inputs.message }}
         run: |
           python - <<'PY'
           import json
@@ -19,7 +25,8 @@ jobs:
 
           bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
           chat_id = os.environ["TELEGRAM_CHAT_ID"]
-          messages = [
+          custom_message = os.environ.get("CUSTOM_MESSAGE", "").strip()
+          messages = [custom_message] if custom_message else [
               "[TEST] [ETHUSDT] T\u00edn hi\u1ec7u MUA\n"
               "Xu h\u01b0\u1edbng ch\u00ednh: T\u0103ng\n"
               "Khung v\u00e0o l\u1ec7nh: 15m\n"
