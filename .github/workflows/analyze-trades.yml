@@ -51,6 +51,44 @@ jobs:
               return setup.get(key, default)
 
 
+          def zone_metrics(row: dict) -> dict:
+              entry = float(row.get("entry_price") or 0)
+              sl = float(row.get("stop_loss") or 0)
+              zone_low = setup_field(row, "zone_low")
+              zone_high = setup_field(row, "zone_high")
+              if zone_low is None or zone_high is None or float(zone_high) == float(zone_low):
+                  return {
+                      "inside_zone": False,
+                      "deep_half": False,
+                      "position": None,
+                      "risk_percent": None,
+                  }
+              zone_low = float(zone_low)
+              zone_high = float(zone_high)
+              midpoint = (zone_low + zone_high) / 2
+              side = row.get("side")
+              inside_zone = zone_low <= entry <= zone_high
+              deep_half = (entry <= midpoint) if side == "LONG" else (entry >= midpoint)
+              risk_percent = abs(entry - sl) / entry if entry else None
+              return {
+                  "inside_zone": inside_zone,
+                  "deep_half": inside_zone and deep_half,
+                  "position": (entry - zone_low) / (zone_high - zone_low),
+                  "risk_percent": risk_percent,
+              }
+
+
+          def summarize_filter(name: str, rows: list[dict], predicate) -> None:
+              selected = [row for row in rows if predicate(row)]
+              if not selected:
+                  print(f"FILTER {name}: total=0")
+                  return
+              wins = sum(1 for row in selected if row.get("outcome") == "WIN")
+              losses = sum(1 for row in selected if row.get("outcome") == "LOSS")
+              total_r = sum(float(row.get("pnl_r") or 0) for row in selected)
+              print(f"FILTER {name}: total={len(selected)} wins={wins} losses={losses} winrate={(wins/len(selected))*100:.2f} total_r={total_r:.2f}")
+
+
           def load_firestore() -> list[dict]:
               service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
               if not service_account_json:
@@ -148,6 +186,23 @@ jobs:
               for weekday in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]:
                   if by_weekday[weekday]:
                       print(f"{weekday},{by_weekday[weekday]},{by_weekday_loss[weekday]},{(by_weekday_loss[weekday]/by_weekday[weekday])*100:.2f}")
+
+              print("CANDIDATE_FILTERS")
+              summarize_filter("entry_close_inside_zone", rows, lambda row: zone_metrics(row)["inside_zone"])
+              summarize_filter("entry_deep_half_of_zone", rows, lambda row: zone_metrics(row)["deep_half"])
+              summarize_filter("skip_weekend", rows, lambda row: (normalize_datetime(row.get("signal_time")) or datetime.min).weekday() < 5)
+              summarize_filter(
+                  "deep_half_and_skip_weekend",
+                  rows,
+                  lambda row: zone_metrics(row)["deep_half"] and (normalize_datetime(row.get("signal_time")) or datetime.min).weekday() < 5,
+              )
+              summarize_filter(
+                  "deep_half_weekday_low_risk",
+                  rows,
+                  lambda row: zone_metrics(row)["deep_half"]
+                  and (normalize_datetime(row.get("signal_time")) or datetime.min).weekday() < 5
+                  and (zone_metrics(row)["risk_percent"] is not None and zone_metrics(row)["risk_percent"] <= 0.012),
+              )
 
               print("RECENT_LOSSES id,symbol,timeframe,strategy,side,score,rr,entry,sl,tp,structure_low,structure_high,zone_low,zone_high,signal_time,close_time,bitget")
               losses_sorted = sorted(
