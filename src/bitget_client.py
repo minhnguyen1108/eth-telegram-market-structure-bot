@@ -6,6 +6,7 @@ import hmac
 import json
 import time
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from uuid import uuid4
 
 import requests
@@ -66,6 +67,12 @@ class BitgetClient:
             raise RuntimeError(f"Bitget API error {data.get('code')}: {data.get('msg')}")
         return data
 
+    def _format_price(self, price: float, tick: str = "0.01") -> str:
+        tick_value = Decimal(tick)
+        rounded = (Decimal(str(price)) / tick_value).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * tick_value
+        decimals = max(0, -tick_value.as_tuple().exponent)
+        return f"{rounded:.{decimals}f}"
+
     def set_leverage(self, *, symbol: str, product_type: str, margin_coin: str, leverage: str) -> dict:
         payload = {
             "symbol": symbol,
@@ -99,8 +106,8 @@ class BitgetClient:
             "tradeSide": "open",
             "orderType": "market",
             "clientOid": client_oid,
-            "presetStopSurplusPrice": f"{take_profit:.8f}",
-            "presetStopLossPrice": f"{stop_loss:.8f}",
+            "presetStopSurplusPrice": self._format_price(take_profit),
+            "presetStopLossPrice": self._format_price(stop_loss),
         }
         data = self._post("/api/v2/mix/order/place-order", payload)
         order_data = data.get("data") or {}

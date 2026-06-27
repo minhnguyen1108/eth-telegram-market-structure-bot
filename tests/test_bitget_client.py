@@ -27,6 +27,30 @@ class FakeResponse:
 
 
 class BitgetClientTest(unittest.TestCase):
+    def test_place_market_order_rounds_preset_prices_to_cent_tick(self) -> None:
+        client = BitgetClient(api_key="key", api_secret="secret", passphrase="pass")
+
+        with patch(
+            "src.bitget_client.requests.post",
+            return_value=FakeResponse(200, {"code": "00000", "data": {"orderId": "order-1"}}),
+        ) as post:
+            client.place_market_order(
+                symbol="ETHUSDT",
+                side="LONG",
+                size="0.01",
+                product_type="USDT-FUTURES",
+                margin_mode="isolated",
+                margin_coin="USDT",
+                take_profit=3456.789,
+                stop_loss=3421.234,
+                client_oid_prefix="test",
+            )
+
+        payload = post.call_args.kwargs["data"].decode("utf-8")
+        self.assertIn('"presetStopSurplusPrice":"3456.79"', payload)
+        self.assertIn('"presetStopLossPrice":"3421.23"', payload)
+        self.assertNotIn('"presetStopSurplusPrice":"3456.78900000"', payload)
+
     def test_set_leverage_posts_expected_payload(self) -> None:
         client = BitgetClient(api_key="key", api_secret="secret", passphrase="pass")
 
