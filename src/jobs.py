@@ -138,6 +138,10 @@ def strategy_min_score(strategy_version: str) -> int:
     return settings.min_signal_score
 
 
+def is_weekend_trade(trigger_time: datetime) -> bool:
+    return trigger_time.weekday() >= 5
+
+
 def run_signal_scan() -> str:
     storage = init_storage()
     created_signals: list[int] = []
@@ -160,6 +164,8 @@ def run_signal_scan() -> str:
                 continue
 
             trigger_time = utc_to_local_naive(datetime.fromisoformat(setup.trigger_candle_time))
+            if is_weekend_trade(trigger_time):
+                continue
             if storage.open_trade_count(symbol, timeframe) >= settings.max_open_trades_per_timeframe:
                 continue
             if storage.latest_duplicate(symbol, setup.side, trigger_time, timeframe):

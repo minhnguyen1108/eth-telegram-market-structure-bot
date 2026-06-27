@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass
 
 from src.binance_client import Candle
 
+MAX_SETUP_RISK_PERCENT = 0.012
+
 
 @dataclass(frozen=True)
 class Pivot:
@@ -109,6 +111,19 @@ def bearish_confirmation(last_candle: Candle, prev_candle: Candle) -> bool:
     return bearish_engulfing or pin_bar
 
 
+def risk_percent(entry: float, stop_loss: float) -> float:
+    return abs(entry - stop_loss) / entry if entry else 999.0
+
+
+def is_deep_value_pullback(side: str, entry: float, zone_low: float, zone_high: float) -> bool:
+    if not zone_low <= entry <= zone_high:
+        return False
+    midpoint = (zone_low + zone_high) / 2
+    if side == "LONG":
+        return entry <= midpoint
+    return entry >= midpoint
+
+
 def build_signal(
     lower_tf: list[Candle],
     higher_tf: list[Candle],
@@ -145,13 +160,16 @@ def build_signal(
             return None
         zone_high = impulse_high - range_size * 0.382
         zone_low = impulse_high - range_size * 0.618
-        in_zone = zone_low <= recent_close <= zone_high or zone_low <= last_candle.low <= zone_high
-        if not in_zone or not bullish_confirmation(last_candle, prev_candle):
+        if not is_deep_value_pullback("LONG", recent_close, zone_low, zone_high):
+            return None
+        if not bullish_confirmation(last_candle, prev_candle):
             return None
         stop_loss = min(swing_low, last_candle.low) * 0.998
         entry = recent_close
         risk = entry - stop_loss
         if risk <= 0:
+            return None
+        if risk_percent(entry, stop_loss) > MAX_SETUP_RISK_PERCENT:
             return None
         take_profit = entry + risk * risk_reward
         score = (
@@ -191,13 +209,16 @@ def build_signal(
         return None
     zone_low = impulse_low + range_size * 0.382
     zone_high = impulse_low + range_size * 0.618
-    in_zone = zone_low <= recent_close <= zone_high or zone_low <= last_candle.high <= zone_high
-    if not in_zone or not bearish_confirmation(last_candle, prev_candle):
+    if not is_deep_value_pullback("SHORT", recent_close, zone_low, zone_high):
+        return None
+    if not bearish_confirmation(last_candle, prev_candle):
         return None
     stop_loss = max(swing_high, last_candle.high) * 1.002
     entry = recent_close
     risk = stop_loss - entry
     if risk <= 0:
+        return None
+    if risk_percent(entry, stop_loss) > MAX_SETUP_RISK_PERCENT:
         return None
     take_profit = entry - risk * risk_reward
     score = (
